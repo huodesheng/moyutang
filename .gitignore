@@ -1,0 +1,17 @@
+# Working material — not part of the shareable package or the published repo
+assets/raw/
+assets/gen/
+assets/gen.log
+assets/*.png
+!assets/preview_anim.png
+!assets/check_fish.png
+dist/
+tools/private/
+tools/.tmp-*.mjs
+__pycache__/
+*.pyc
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.tmp

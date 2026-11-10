@@ -1,0 +1,64 @@
+{
+  "palettes": {
+    "newbie-creek": "warm sunlit creek greens, cream and soft gold",
+    "caffeine-lake": "coffee browns, crema beige and caramel",
+    "bug-swamp": "mossy swamp greens, muddy olive and amber",
+    "overtime-sea": "deep night navy, moonlit silver and warm window gold",
+    "context-abyss": "abyssal cyan, indigo and bioluminescent teal",
+    "whale-fall": "pale abyss blue, bone white and soft starlight"
+  },
+  "style": "chunky 16-color pixel art, thick 1px dark-brown outline, cream belly, soft dithering, crisp pixels with no blur, front-left side view, full body, centered with a generous margin, plain pure white background, no shadow, no water, no text, no frame, no UI",
+  "fish": [
+    { "id": "zhoubao", "pond": "newbie-creek", "visual": "a plump pale-gold carp whose scales look like tiny paper sheets, one thin ink-brush stripe along its side, sleepy eyes, a small folded weekly-report fin behind the gills" },
+    { "id": "daiyu", "pond": "newbie-creek", "visual": "a long slim silver ribbonfish with a red necktie pattern behind the head and a smug little smile" },
+    { "id": "xuqiu", "pond": "newbie-creek", "visual": "a slender muddy-brown loach whose colour patches shift from teal to orange, with a tiny clipboard-shaped pectoral fin" },
+    { "id": "tuanjian", "pond": "newbie-creek", "visual": "a round cheerful crucian carp with orange-red scales and a tiny pennant flag stuck on its back" },
+    { "id": "moyuwang", "pond": "newbie-creek", "visual": "a regal chubby teal fish wearing a crooked paper crown, gold trim on its fins, half-closed smug eyes" },
+    { "id": "gongwei", "pond": "newbie-creek", "visual": "a white-and-orange koi whose pattern looks like sticky notes and pen marks, tiny office-desk details on the scales" },
+    { "id": "zhouwu", "pond": "newbie-creek", "visual": "a golden fancy goldfish with flowing sunset-coloured fins, tiny sparkles around it, happy closed eyes" },
+    { "id": "xizhu", "pond": "newbie-creek", "visual": "a huge ancient pond-lord catfish with a mossy back, long whiskers, reeds growing from its crown, calm heavy-lidded eyes" },
+
+    { "id": "meishi", "pond": "caffeine-lake", "visual": "a small dark-roast brown fish with a glossy coffee sheen and a tiny crema swirl on its head" },
+    { "id": "lengcui", "pond": "caffeine-lake", "visual": "a slim icy-brown fish covered in tiny condensation droplets, cool blue rim light" },
+    { "id": "kafeizha", "pond": "caffeine-lake", "visual": "a small speckled grey-brown loach with coffee-ground spots, resting low, droopy eyes" },
+    { "id": "kabuqinuo", "pond": "caffeine-lake", "visual": "a bass wearing a thick layer of cream foam along its back, dusted with cinnamon" },
+    { "id": "nongsuo", "pond": "caffeine-lake", "visual": "an intense espresso-dark trout with one bright crema stripe, tight tense eyes, steam wisps" },
+    { "id": "guozai", "pond": "caffeine-lake", "visual": "a long electric-brown eel with zigzag caffeine-crystal ridges along its body, jittery motion" },
+    { "id": "lahua", "pond": "caffeine-lake", "visual": "a giant latte-art sea serpent whose back carries a cream rosetta pattern, its head shaped like a coffee cup, wavy crema fins" },
+
+    { "id": "kongzhizhen", "pond": "bug-swamp", "visual": "a tiny tadpole with a hollow transparent head and a dotted outline, confused dot eyes" },
+    { "id": "fenhao", "pond": "bug-swamp", "visual": "a shrimp curled exactly like a semicolon, small punctuation dots on its shell" },
+    { "id": "suojin", "pond": "bug-swamp", "visual": "a loach whose side stripes are offset by one notch, one stripe visibly out of line, mildly embarrassed face" },
+    { "id": "duancuowu", "pond": "bug-swamp", "visual": "a dark loach with a cracked broken shell across its back, a single red warning segment" },
+    { "id": "yuejie", "pond": "bug-swamp", "visual": "a catfish whose tail pokes visibly past a thin dashed boundary line drawn beside it" },
+    { "id": "buding", "pond": "bug-swamp", "visual": "a cod with a clearly stitched patch sewn onto its side, mismatched scale colours around the stitches" },
+    { "id": "laobug", "pond": "bug-swamp", "visual": "an ancient armoured swamp crocodile-fish with mossy plates, glowing amber eyes, dripping weeds" },
+
+    { "id": "jiaban", "pond": "overtime-sea", "visual": "a small blue-grey sardine wearing a tiny necktie, heavy tired eyes" },
+    { "id": "yexiao", "pond": "overtime-sea", "visual": "a golden fried ribbonfish with crispy edges and a little steam rising from it" },
+    { "id": "huiyi", "pond": "overtime-sea", "visual": "a flatfish covered in many tiny open mouths all talking, grey-blue, a little overwhelmed" },
+    { "id": "pingmu", "pond": "overtime-sea", "visual": "a snapper glowing with monitor-blue light, pixel-shaped reflections across its scales" },
+    { "id": "dagong", "pond": "overtime-sea", "visual": "a silver herring carrying a tiny backpack and a lanyard badge, dutiful expression" },
+    { "id": "jianmao", "pond": "overtime-sea", "visual": "a snapper whose scales are arranged like beige and brown keyboard keycaps" },
+    { "id": "tongxiao", "pond": "overtime-sea", "visual": "a very long dark eel with deep under-eye shadows and a faint moon halo above it" },
+    { "id": "juluo", "pond": "overtime-sea", "visual": "a giant deep-sea squid with one huge glowing eye, dark purple mantle with lantern spots" },
+
+    { "id": "shangxiawen", "pond": "context-abyss", "visual": "a tiny translucent shrimp carrying three stacked translucent memory bubbles, half of them fading" },
+    { "id": "jianduan", "pond": "context-abyss", "visual": "a ray whose whip tail stops abruptly at a clean vertical cut, tiny pixel crumbs falling" },
+    { "id": "jixing", "pond": "context-abyss", "visual": "a pufferfish with a faded blank patch on its side where a pattern used to be" },
+    { "id": "zhaiyao", "pond": "context-abyss", "visual": "a flatfish with one single pale highlighted line across its back, everything else muted" },
+    { "id": "yinyong", "pond": "context-abyss", "visual": "a sturgeon whose tail curves forward into its own mouth like a loop, faint recursion glow" },
+    { "id": "changwen", "pond": "context-abyss", "visual": "an extremely long coiled eel filling most of the frame, its body looping in tight spirals" },
+    { "id": "shenshen", "pond": "context-abyss", "visual": "a deep glowing ray covered in bioluminescent dots, trailing luminous fins into darkness" },
+    { "id": "chenmo", "pond": "context-abyss", "visual": "a huge silent whale-fish with no visible eyes, glowing seams along its body, very calm and heavy" },
+
+    { "id": "jingluo", "pond": "whale-fall", "visual": "a tiny fish made of drifting pale particles and plankton dots, barely solid" },
+    { "id": "haixue", "pond": "whale-fall", "visual": "a white cod dusted with snow-like marine snow dots drifting around it" },
+    { "id": "lanjing", "pond": "whale-fall", "visual": "a shadow-blue whale-shaped fish, semi-transparent, only its outline and a soft glow visible" },
+    { "id": "liniguang", "pond": "whale-fall", "visual": "a herring leaving a phosphorescent trail of small blue sparks behind its tail" },
+    { "id": "jingmi", "pond": "whale-fall", "visual": "a very calm silver snapper with closed eyes and perfectly still fins, a hush around it" },
+    { "id": "sikao", "pond": "whale-fall", "visual": "a glowing jellyfish whose tendrils curl into a question-mark shape, bright thoughts flickering inside" },
+    { "id": "huisheng", "pond": "whale-fall", "visual": "a sturgeon surrounded by three concentric echo rings of pale light" },
+    { "id": "linggan", "pond": "whale-fall", "visual": "a tiny night fish with a light-bulb lure above its head and a few star sparkles around it" }
+  ]
+}

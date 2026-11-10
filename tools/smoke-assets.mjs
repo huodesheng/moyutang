@@ -1,0 +1,174 @@
+/**
+ * Asset-path smoke test: renders the components that switch to real artwork and
+ * checks they produce <img> nodes instead of the procedural SVG fallback.
+ */
+import fs from 'node:fs'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+const source = fs.readFileSync(path.join(ROOT, 'client.js'), 'utf8')
+const marker = '    return {\n      inject: [\'slots\'],'
+const instrumented = source.replace(
+  marker,
+  `    globalThis.__MT_ASSETS__ = { FishImage, ItemIcon, PondScene, CatchCard, FISH, PONDS }
+${marker}`,
+)
+const temporary = path.join(path.join(ROOT, 'tools'), '.tmp-assets.mjs')
+fs.writeFileSync(temporary, instrumented)
+
+globalThis.window = { __ModuleLoader__: { load(def) { globalThis.__DEF__ = def } }, addEventListener() {}, removeEventListener() {} }
+globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+globalThis.performance = globalThis.performance || { now: () => Date.now() }
+globalThis.requestAnimationFrame = () => 0
+globalThis.cancelAnimationFrame = () => {}
+globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true }) })
+
+let hookStore = []
+let hookIndex = 0
+const React = {
+  createElement: (type, props, ...children) => ({ $$el: true, type, props: props || {}, children: children.flat(Infinity) }),
+  createContext: () => ({ Provider: 'p' }),
+  useContext: () => ({ t: (k) => k }),
+  useState: (init) => {
+    const i = hookIndex++
+    if (!(i in hookStore)) hookStore[i] = typeof init === 'function' ? init() : init
+    return [hookStore[i], () => {}]
+  },
+  useRef: (init) => {
+    const i = hookIndex++
+    if (!(i in hookStore)) hookStore[i] = { current: init }
+    return hookStore[i]
+  },
+  useEffect: () => {
+    hookIndex += 1
+  },
+  useMemo: (fn) => {
+    hookIndex += 1
+    return fn()
+  },
+  useCallback: (fn) => {
+    hookIndex += 1
+    return fn
+  },
+  Component: class {
+    constructor(props) {
+      this.props = props
+    }
+  },
+}
+
+await import(pathToFileURL(temporary).href)
+const plugin = globalThis.__DEF__.factory(() => React)
+const ctx = {
+  get: () => undefined,
+  effect: (fn) => {
+    fn()
+    return () => {}
+  },
+  slots: { inject: (key, cb) => { cb(); return () => {} }, register: () => () => {} },
+}
+plugin.apply(ctx)
+const api = globalThis.__MT_ASSETS__
+fs.unlinkSync(temporary)
+
+function render(component, props) {
+  hookStore = []
+  hookIndex = 0
+  return component(props)
+}
+
+function collect(node, out = []) {
+  if (!node || typeof node !== 'object') return out
+  if (Array.isArray(node)) {
+    node.forEach((child) => collect(child, out))
+    return out
+  }
+  if (!node.$$el) return out
+  out.push(node)
+  node.children.forEach((child) => collect(child, out))
+  return out
+}
+
+let failures = 0
+function check(name, condition, detail) {
+  console.log(`${condition ? 'ok  ' : 'FAIL'} ${name}${condition || detail === undefined ? '' : ` → ${detail}`}`)
+  if (!condition) failures += 1
+}
+
+const fish = api.FISH.find((entry) => entry.id === 'moyu')
+const assets = {
+  fish: new Set(api.FISH.map((entry) => entry.id)),
+  items: new Set(['bamboo', 'hut', 'bobber', 'glow']),
+  ponds: new Set(api.PONDS.map((pond) => pond.id)),
+  url: (kind, id) => `/moyutang-api/asset/${kind}/${id}.webp?v=1`,
+}
+
+const fishTree = collect(render(api.FishImage, { fish, size: 72, assets }))
+const fishImg = fishTree.find((node) => node.type === 'img')
+check('FishImage renders an <img> when art exists', Boolean(fishImg), JSON.stringify(fishTree.map((n) => n.type)))
+check('FishImage points at the asset route', fishImg && fishImg.props.src === '/moyutang-api/asset/fish/moyu.webp?v=1', fishImg && fishImg.props.src)
+
+const lockedTree = collect(render(api.FishImage, { fish, size: 72, assets, locked: true }))
+check('locked fish keeps the silhouette fallback', !lockedTree.some((node) => node.type === 'img'))
+
+const noArtTree = collect(render(api.FishImage, { fish, size: 72, assets: { ...assets, fish: new Set() } }))
+check('missing art falls back to the SVG', !noArtTree.some((node) => node.type === 'img'))
+
+const iconTree = collect(render(api.ItemIcon, { id: 'bamboo', assets, size: 36 }))
+check('ItemIcon renders an <img>', iconTree.some((node) => node.type === 'img'))
+const missingIcon = collect(render(api.ItemIcon, { id: 'nope', assets }))
+check('unknown item renders nothing', missingIcon.length === 0)
+
+const pond = api.PONDS[0]
+const sceneProps = {
+  pond,
+  phase: 'day',
+  power: 40,
+  watching: true,
+  bite: false,
+  reduceMotion: false,
+  assets,
+  floatArt: 'bobber',
+  decorations: ['hut'],
+  machine: {
+    phase: 'waiting',
+    nibbling: false,
+    castTo: pond.anchor.float,
+    float: { x: pond.anchor.float[0], y: pond.anchor.float[1] },
+    splash: false,
+  },
+}
+const scene = collect(render(api.PondScene, sceneProps))
+check('pond scene paints the artwork layer', scene.some((node) => node.props.className === 'mt-scene-art'))
+check('float sprite is placed on the water', scene.some((node) => node.type === 'img' && String(node.props.className).includes('mt-float-sprite')))
+check('fishing line is drawn from the rod tip', scene.some((node) => node.props.className === 'mt-fishing-line'))
+
+const casting = collect(render(api.PondScene, {
+  ...sceneProps,
+  machine: { ...sceneProps.machine, phase: 'casting', float: { x: 30, y: 40 }, splash: true },
+}))
+check('casting draws the flying float and splash', casting.some((node) => String(node.props.className).includes('mt-float-sprite'))
+  && casting.some((node) => node.props.className === 'mt-splash'))
+
+const charging = collect(render(api.PondScene, {
+  ...sceneProps,
+  machine: { ...sceneProps.machine, phase: 'charging', float: null },
+}))
+check('charging shows the landing target ring', charging.some((node) => node.props.className === 'mt-target-ring'))
+
+const biting = collect(render(api.PondScene, { ...sceneProps, bite: true, machine: { ...sceneProps.machine, phase: 'bite' } }))
+check('bite shows the bubble and the shake class', biting.some((node) => node.props.className === 'mt-bite-bubble')
+  && biting.some((node) => String(node.props.className).includes('mt-scene-bite')))
+check('pond scene renders owned decorations', scene.some((node) => String(node.props.className || '').includes('mt-scene-decor-item')))
+
+const fallbackScene = collect(render(api.PondScene, {
+  ...sceneProps,
+  decorations: [],
+  assets: { ...assets, ponds: new Set() },
+}))
+check('pond scene falls back to the CSS sky', fallbackScene.some((node) => node.props.className === 'mt-sky'))
+
+console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)
+process.exit(failures === 0 ? 0 : 1)
