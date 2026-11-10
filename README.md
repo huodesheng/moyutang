@@ -2,7 +2,7 @@
 
 > 边写代码边钓鱼。你和 Agent 对话消耗的 Token 会自动变成鱼饵积分，积分可以在左侧边栏的鱼塘里抛竿；钓到的鱼点亮图鉴、卖金币、买装备、解锁新鱼塘。
 
-按 `D:\Desktop\摸鱼塘.docx`（DSH 插件策划 · 娱乐类 · 摸鱼塘 v1.0）实现，落地为 DeepSeek Harness 的一个本地插件包：
+按策划案《DSH 插件策划 · 娱乐类 · 摸鱼塘 v1.0》实现，落地为 DeepSeek Harness 的一个本地插件包：
 
 - **左侧图标列表**多了一个「摸鱼塘」图标（`sidebar.panellist`），点开是中央面板（`main`）。
 - **Host 半**只统计 Token 用量，不读对话内容；**Client 半**是全部游戏逻辑与界面。
@@ -174,7 +174,7 @@ tools/                数值测试、渲染测试、素材处理与生图脚本
 
 ### 美术素材怎么来的
 
-- **鱼塘场景 6 张、鱼贴图 12 条、道具 6 个**：来自 `D:\Desktop\摸鱼塘.docx` 里的 27 张图（另有 3 张是索引图，仅作对照）。`tools/build_assets.py` 负责裁切 16:9 场景、把棋盘格/奶油底抠成透明、裁到内容边界后缩放成 WebP。
+- **鱼塘场景 6 张、鱼贴图 12 条、道具 6 个**：来自策划案文档里的 27 张图（另有 3 张是索引图，仅作对照）。`tools/build_assets.py` 负责裁切 16:9 场景、把棋盘格/奶油底抠成透明、裁到内容边界后缩放成 WebP。
 - **其余 46 条鱼**：用文档里给的异步生图接口（BaseURL `https://api.goeasyapi.xyz`，模型 `gpt-image-2-async`，`1024x1024`）按 `assets/prompts/fish.json` 的提示词批量生成，`tools/gen_fish.py` 三个并发跑完，`tools/process_gen.py` 抠白底后产出透明 WebP。Key 只放在 `%TEMP%\moyutang-goeasy-key.txt`，没有进仓库。
 - 想换风格或补图：改 `assets/prompts/fish.json` 里某条鱼的 `visual`，重跑 `gen_fish.py`（已有的会跳过，删掉 `assets/gen/<id>.png` 即可重生）再跑 `process_gen.py`；场景图直接替换 `assets/raw` 里对应文件后跑 `build_assets.py`。
 
