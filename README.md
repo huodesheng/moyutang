@@ -29,18 +29,11 @@ pwsh -NoProfile -File tools\pack.ps1
 
 ### B. 开源仓库（适合迭代和 PR）
 
-推到 GitHub 之后，对方可以用 pnpm 支持的 git 规格安装：
+仓库就在 <https://github.com/huodesheng/moyutang>。对方可以用 pnpm 支持的 git 规格安装：
 
-> 把 `github:<你的用户名>/dsh-moyutang` 作为插件包安装并启用
+> 把 `github:huodesheng/moyutang` 作为插件包安装并启用
 
-注意 git 安装会拉整个仓库（`files` 字段不生效），所以别把 `assets/raw`、`assets/gen`（约 88 MB）提交进去——加一条 `.gitignore`：
-
-```
-assets/raw/
-assets/gen/
-dist/
-tools/.tmp-*.mjs
-```
+注意 git 安装会拉整个仓库（`files` 字段不生效），所以别把 `assets/raw`、`assets/gen`（约 88 MB 源料）提交进去——`.gitignore` 已经排掉了，另外 `tools/private/` 里放的是作者侧的一次性脚本。
 
 ### C. 发布到 npm（对方一行就能装）
 
