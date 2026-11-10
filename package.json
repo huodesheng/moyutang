@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-moyutang",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "private": true,
   "description": "摸鱼塘：把 Agent 消耗的 Token 变成鱼饵积分，在侧边栏钓鱼、集图鉴、换金币。",
   "type": "module",

@@ -12,7 +12,7 @@ const source = fs.readFileSync(path.join(ROOT, 'client.js'), 'utf8')
 const marker = '    return {\n      inject: [\'slots\'],'
 const instrumented = source.replace(
   marker,
-  `    globalThis.__MT_ASSETS__ = { FishImage, ItemIcon, PondScene, CatchCard, WeatherLayer, FISH, PONDS }
+  `    globalThis.__MT_ASSETS__ = { FishImage, ItemIcon, PondScene, CatchCard, WeatherLayer, PetLayer, petAnimation, FISH, PONDS }
 ${marker}`,
 )
 const temporary = path.join(path.join(ROOT, 'tools'), '.tmp-assets.mjs')
@@ -189,6 +189,60 @@ const calmStorm = collect(render(api.WeatherLayer, { storm: true, phase: 'night'
 check('reduce motion keeps the darkening but drops rain', calmStorm.some((node) => node.props.className === 'mt-storm-dark')
   && !calmStorm.some((node) => String(node.props.className || '').includes('mt-rain')))
 check('night adds a time tint', calmStorm.some((node) => node.props.className === 'mt-time-tint'))
+
+/* ---- pets ---------------------------------------------------------- */
+
+const catGame = { save: { pet: { id: 'cat', x: 0.7, y: 0.8 } }, act: () => true }
+const catPet = collect(render(api.PetLayer, {
+  game: catGame,
+  pets: [],
+  machine: { phase: 'idle', outcome: null },
+  auto: false,
+  assets,
+  draggingHint: 'drag',
+}))
+check('built-in cat renders at its saved spot',
+  catPet.some((node) => String(node.props.className || '').includes('mt-pet'))
+  && catPet.some((node) => node.type === 'img' && String(node.props.className).includes('mt-pet-cat')))
+
+const sheetPet = {
+  id: 'local:kitty',
+  displayName: 'Kitty',
+  frame: { width: 192, height: 208, columns: 8, rows: 9 },
+  animations: {},
+  sprite: '/moyutang-api/pet/local/kitty/sprite',
+}
+const codexGame = { save: { pet: { id: 'local:kitty', x: 0.5, y: 0.8 } }, act: () => true }
+const codexPet = collect(render(api.PetLayer, {
+  game: codexGame,
+  pets: [sheetPet],
+  machine: { phase: 'idle', outcome: null },
+  auto: false,
+  assets,
+  draggingHint: 'drag',
+}))
+const sheetNode = codexPet.find((node) => String(node.props.className || '').includes('mt-pet-sheet'))
+check('codex pet renders as a sprite-sheet frame', Boolean(sheetNode))
+check('sprite sheet background is scaled to the grid',
+  sheetNode && sheetNode.props.style.backgroundSize === '768px 936px', sheetNode && sheetNode.props.style.backgroundSize)
+check('idle starts at row 0', sheetNode && /^-?0px -?0px$/.test(sheetNode.props.style.backgroundPosition), sheetNode && sheetNode.props.style.backgroundPosition)
+
+const idleAnim = api.petAnimation(sheetPet, 'idle')
+const jumpAnim = api.petAnimation(sheetPet, 'jumping')
+check('default idle uses 6 frames from row 0', idleAnim.frames.length === 6 && idleAnim.frames[0] === 0)
+check('default jumping uses 5 frames from row 4', jumpAnim.frames.length === 5 && jumpAnim.frames[0] === 32, jumpAnim.frames[0])
+const customAnim = api.petAnimation({ ...sheetPet, animations: { failed: { frames: [3, 4], fps: 4 } } }, 'failed')
+check('pet.json animations override the defaults', customAnim.frames.join(',') === '3,4' && customAnim.fps === 4)
+
+const missingPet = collect(render(api.PetLayer, {
+  game: { save: { pet: { id: 'gone', x: 0.5, y: 0.5 } }, act: () => true },
+  pets: [],
+  machine: { phase: 'idle', outcome: null },
+  auto: false,
+  assets,
+  draggingHint: 'drag',
+}))
+check('unknown pet id renders nothing', missingPet.length === 0)
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)
 process.exit(failures === 0 ? 0 : 1)

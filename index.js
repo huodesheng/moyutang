@@ -22,11 +22,118 @@ const SAVE_DELAY = 1200
 const STORM_WINDOW = 5 * 60 * 1000
 const STORM_ERRORS = 2
 
+/* Codex 宠物：${CODEX_HOME:-~/.codex}/pets/<名字>/{pet.json,spritesheet.webp}，
+   另外也可以放在 <摸鱼塘数据目录>/pets/ 下。网格默认 8×9、单格 192×208。 */
+const PET_NAME = /^[A-Za-z0-9._-]{1,64}$/
+const PET_ROOTS = { codex: null, local: null }
+const PET_FRAME_DEFAULT = { width: 192, height: 208, columns: 8, rows: 9 }
+const PET_ANIMATION_NAMES = ['idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'waiting', 'running', 'review']
+
 function dataDirectory() {
   const override = process.env.DSH_MOYUTANG_DIR
   if (typeof override === 'string' && override.trim() !== '') return override
   return path.join(os.homedir(), '.dsh', 'moyutang')
 }
+
+function petRoots() {
+  const codexHome = typeof process.env.CODEX_HOME === 'string' && process.env.CODEX_HOME.trim() !== ''
+    ? process.env.CODEX_HOME
+    : path.join(os.homedir(), '.codex')
+  PET_ROOTS.codex = path.join(codexHome, 'pets')
+  PET_ROOTS.local = path.join(dataDirectory(), 'pets')
+  return PET_ROOTS
+}
+
+function positiveInt(value, fallback) {
+  return Number.isInteger(value) && value > 0 && value <= 4096 ? value : fallback
+}
+
+function sanitizeAnimations(raw, columns) {
+  const result = {}
+  if (!raw || typeof raw !== 'object') return result
+  for (const name of PET_ANIMATION_NAMES) {
+    const spec = raw[name]
+    if (!spec || typeof spec !== 'object') continue
+    const frames = Array.isArray(spec.frames)
+      ? spec.frames.filter((frame) => Number.isInteger(frame) && frame >= 0 && frame < columns * PET_FRAME_DEFAULT.rows * 4)
+      : []
+    if (frames.length === 0) continue
+    const fps = typeof spec.fps === 'number' && spec.fps > 0 && spec.fps <= 60 ? spec.fps : 8
+    result[name] = {
+      frames,
+      fps,
+      loop: spec.loop !== false,
+      fallback: typeof spec.fallback === 'string' ? spec.fallback : 'idle',
+    }
+  }
+  return result
+}
+
+function readPet(rootKey, name) {
+  const root = petRoots()[rootKey]
+  if (!root) return null
+  const directory = path.join(root, name)
+  let manifest
+  try {
+    manifest = JSON.parse(fs.readFileSync(path.join(directory, 'pet.json'), 'utf8'))
+  } catch {
+    return null
+  }
+  if (!manifest || typeof manifest !== 'object') return null
+  const frame = {
+    width: positiveInt(manifest.frame?.width, PET_FRAME_DEFAULT.width),
+    height: positiveInt(manifest.frame?.height, PET_FRAME_DEFAULT.height),
+    columns: positiveInt(manifest.frame?.columns, PET_FRAME_DEFAULT.columns),
+    rows: positiveInt(manifest.frame?.rows, PET_FRAME_DEFAULT.rows),
+  }
+  const relative = typeof manifest.spritesheetPath === 'string' && manifest.spritesheetPath.trim() !== ''
+    ? manifest.spritesheetPath
+    : 'spritesheet.webp'
+  const base = path.resolve(directory)
+  const sprite = path.resolve(base, relative)
+  if (!sprite.startsWith(`${base}${path.sep}`)) return null
+  try {
+    if (!fs.statSync(sprite).isFile()) return null
+  } catch {
+    return null
+  }
+  return {
+    id: `${rootKey}:${name}`,
+    name,
+    displayName: String(manifest.displayName || manifest.id || name),
+    description: String(manifest.description || ''),
+    frame,
+    animations: sanitizeAnimations(manifest.animations, frame.columns),
+    source: rootKey,
+    spritePath: sprite,
+    sprite: `${ROUTE}/pet/${rootKey}/${name}/sprite`,
+  }
+}
+
+function listPets() {
+  const roots = petRoots()
+  const pets = []
+  for (const key of Object.keys(roots)) {
+    let names = []
+    try {
+      names = fs.readdirSync(roots[key], { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && PET_NAME.test(entry.name))
+        .map((entry) => entry.name)
+        .sort()
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      const pet = readPet(key, name)
+      if (pet) {
+        const { spritePath, ...rest } = pet
+        pets.push(rest)
+      }
+    }
+  }
+  return pets
+}
+
 
 function dayKey(now = Date.now()) {
   const d = new Date(now)
@@ -172,23 +279,7 @@ function assetManifest() {
   return manifest
 }
 
-function serveAsset(request, response, relative) {
-  const parts = relative.split('/')
-  if (parts.length !== 2) {
-    respondJson(response, 404, { ok: false, error: 'not-found' })
-    return
-  }
-  const [kind, name] = parts
-  if (!ASSET_KINDS.includes(kind) || !ASSET_NAME.test(name)) {
-    respondJson(response, 404, { ok: false, error: 'not-found' })
-    return
-  }
-  const base = path.resolve(path.join(ASSET_ROOT, kind))
-  const file = path.resolve(path.join(base, name))
-  if (!file.startsWith(`${base}${path.sep}`)) {
-    respondJson(response, 404, { ok: false, error: 'not-found' })
-    return
-  }
+function serveFile(request, response, file, contentType) {
   let stat
   try {
     stat = fs.statSync(file)
@@ -214,11 +305,52 @@ function serveAsset(request, response, relative) {
     return
   }
   response.statusCode = 200
-  response.setHeader('content-type', 'image/webp')
+  response.setHeader('content-type', contentType)
   response.setHeader('cache-control', 'public, max-age=86400')
   response.setHeader('etag', etag)
   response.setHeader('content-length', blob.length)
   response.end(blob)
+}
+
+function serveAsset(request, response, relative) {
+  const parts = relative.split('/')
+  if (parts.length !== 2) {
+    respondJson(response, 404, { ok: false, error: 'not-found' })
+    return
+  }
+  const [kind, name] = parts
+  if (!ASSET_KINDS.includes(kind) || !ASSET_NAME.test(name)) {
+    respondJson(response, 404, { ok: false, error: 'not-found' })
+    return
+  }
+  const base = path.resolve(path.join(ASSET_ROOT, kind))
+  const file = path.resolve(path.join(base, name))
+  if (!file.startsWith(`${base}${path.sep}`)) {
+    respondJson(response, 404, { ok: false, error: 'not-found' })
+    return
+  }
+  serveFile(request, response, file, 'image/webp')
+}
+
+function servePetSprite(request, response, relative) {
+  const parts = relative.split('/')
+  if (parts.length !== 3 || parts[2] !== 'sprite') {
+    respondJson(response, 404, { ok: false, error: 'not-found' })
+    return
+  }
+  const [source, name] = parts
+  if (!Object.prototype.hasOwnProperty.call(PET_ROOTS, source) || !PET_NAME.test(name)) {
+    respondJson(response, 404, { ok: false, error: 'not-found' })
+    return
+  }
+  const pet = readPet(source, name)
+  if (!pet) {
+    respondJson(response, 404, { ok: false, error: 'not-found' })
+    return
+  }
+  const extension = path.extname(pet.spritePath).toLowerCase()
+  const contentType = extension === '.png' ? 'image/png' : extension === '.webp' ? 'image/webp' : 'application/octet-stream'
+  serveFile(request, response, pet.spritePath, contentType)
 }
 
 /** @param {import('@deepseek-ai/cordis').Context} ctx */
@@ -434,6 +566,15 @@ export function apply(ctx) {
       }
       if (pathname.startsWith(`${ROUTE}/asset/`)) {
         serveAsset(request, response, pathname.slice(`${ROUTE}/asset/`.length))
+        return
+      }
+      if (pathname === `${ROUTE}/pets`) {
+        const roots = petRoots()
+        respondJson(response, 200, { ok: true, pets: listPets(), roots })
+        return
+      }
+      if (pathname.startsWith(`${ROUTE}/pet/`)) {
+        servePetSprite(request, response, pathname.slice(`${ROUTE}/pet/`.length))
         return
       }
       respondJson(response, 404, { ok: false, error: 'not-found' })

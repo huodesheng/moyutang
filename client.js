@@ -248,8 +248,21 @@ window.__ModuleLoader__.load({
       { id: 'hut', name: '小木屋', price: 300, art: 'hut', desc: '岸上多一间小屋，纯外观。' },
       { id: 'chair', name: '钓鱼椅', price: 500, art: 'chair', desc: '坐得舒服一点，鱼不会知道。' },
       { id: 'chime', name: '鲸鱼风铃', price: 1200, art: 'chime', desc: '风一吹，整片水面都在响。' },
-      { id: 'cat', name: '像素猫', price: 800, art: 'cat', desc: '它会盯着水面，但从不帮忙。' },
     ]
+
+    /** 宠物：猫用内置贴图；Codex 宠物用 pet.json + spritesheet.webp（见 usePets）。 */
+    const PET_ITEMS = [
+      {
+        id: 'cat',
+        name: '像素猫',
+        price: 800,
+        desc: '一只会蹲在岸边看水面的猫。买下之后可以直接拖到画面任意位置，钓上鱼它会跳一下。',
+      },
+    ]
+
+    /** Codex 宠物 9 行动画的默认帧数（行序：idle / 右 / 左 / 挥手 / 跳 / 失败 / 等待 / 工作 / 审查）。 */
+    const PET_ROWS = ['idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'waiting', 'running', 'review']
+    const PET_ROW_FRAMES = [6, 8, 8, 4, 5, 8, 6, 6, 6]
 
     const CONSUMABLES = [
       {
@@ -523,6 +536,7 @@ window.__ModuleLoader__.load({
         cheat: { manual: 0 },
         settings: { auto: false, autoPond: 'newbie-creek', reduceMotion: false, confirmPause: true },
         auto: null,
+        pet: null,
         effects: { stormUntil: 0 },
         updatedAt: Date.now(),
       }
@@ -558,6 +572,21 @@ window.__ModuleLoader__.load({
         merged.feed = Array.isArray(raw.feed) ? raw.feed.slice(0, 12) : []
         merged.auto = raw.auto && typeof raw.auto === 'object' ? raw.auto : null
         merged.effects = { ...base.effects, ...(raw.effects || {}) }
+        // 老存档里猫是"装饰"，现在升级成可以拖动的宠物
+        if (Array.isArray(merged.decor) && merged.decor.includes('cat')) {
+          merged.decor = merged.decor.filter((id) => id !== 'cat')
+          merged.owned.cat = true
+          if (!merged.pet) merged.pet = { id: 'cat', x: 0.76, y: 0.84 }
+        }
+        if (merged.pet && typeof merged.pet === 'object' && typeof merged.pet.id === 'string' && merged.pet.id) {
+          merged.pet = {
+            id: merged.pet.id,
+            x: Number.isFinite(merged.pet.x) ? clamp(merged.pet.x, 0.04, 0.96) : 0.76,
+            y: Number.isFinite(merged.pet.y) ? clamp(merged.pet.y, 0.06, 0.96) : 0.84,
+          }
+        } else {
+          merged.pet = null
+        }
         merged.ponds = Array.isArray(raw.ponds) && raw.ponds.length > 0 ? raw.ponds : ['newbie-creek']
         merged.decor = Array.isArray(raw.decor) ? raw.decor : []
         merged.owned = raw.owned && typeof raw.owned === 'object' ? raw.owned : {}
@@ -841,6 +870,171 @@ window.__ModuleLoader__.load({
         [version],
       )
       return useMemo(() => ({ fish, items, ponds, url }), [fish, items, ponds, url])
+    }
+
+    /** 扫描 Codex 宠物（~/.codex/pets 与 <摸鱼塘数据目录>/pets）。 */
+    function usePets() {
+      const [state, setState] = useState({ pets: [], roots: null })
+      useEffect(() => {
+        let alive = true
+        fetch('/moyutang-api/pets', { cache: 'no-store' })
+          .then((response) => (response.ok ? response.json() : null))
+          .then((body) => {
+            if (!alive || !body || !body.ok) return
+            setState({ pets: Array.isArray(body.pets) ? body.pets : [], roots: body.roots || null })
+          })
+          .catch(() => {})
+        return () => {
+          alive = false
+        }
+      }, [])
+      return state
+    }
+
+    function petAnimation(pet, name) {
+      const frame = pet.frame || { width: 192, height: 208, columns: 8, rows: 9 }
+      const custom = pet.animations && pet.animations[name]
+      if (custom && Array.isArray(custom.frames) && custom.frames.length > 0) {
+        return { frames: custom.frames, fps: custom.fps || 8, loop: custom.loop !== false }
+      }
+      const row = Math.max(0, PET_ROWS.indexOf(name))
+      const count = PET_ROW_FRAMES[row] || 6
+      const frames = []
+      for (let index = 0; index < count; index += 1) frames.push(row * frame.columns + index)
+      return { frames, fps: 8, loop: true }
+    }
+
+    function PetLayer({ game, pets, machine, auto, draggingHint, assets }) {
+      const save = game.save
+      const config = save.pet
+      const [pos, setPos] = useState(() => ({ x: config?.x ?? 0.76, y: config?.y ?? 0.84 }))
+      const [dragging, setDragging] = useState(false)
+      const [direction, setDirection] = useState(1)
+      const [frameIndex, setFrameIndex] = useState(0)
+      const posRef = useRef(pos)
+      const dragRef = useRef(null)
+      posRef.current = pos
+
+      const codexPet = config ? pets.find((entry) => entry.id === config.id) : null
+      const isCat = config?.id === 'cat'
+      const active = Boolean(config) && (isCat || Boolean(codexPet))
+
+      const outcome = machine?.outcome
+      const now = Date.now()
+      let animState = 'idle'
+      if (dragging) animState = direction < 0 ? 'running-left' : 'running-right'
+      else if (outcome && now - outcome.at < 1100) animState = outcome.kind === 'catch' ? 'jumping' : 'failed'
+      else if (machine?.phase === 'bite') animState = 'waving'
+      else if (auto) animState = 'running'
+
+      const animation = codexPet ? petAnimation(codexPet, animState) : null
+      const frameKey = animation ? `${animState}:${animation.frames.join(',')}:${animation.fps}` : animState
+
+      useEffect(() => {
+        if (!animation) return undefined
+        setFrameIndex(0)
+        if (animation.frames.length <= 1 || !animation.loop) return undefined
+        const period = Math.max(40, Math.round(1000 / animation.fps))
+        const id = setInterval(() => setFrameIndex((value) => value + 1), period)
+        return () => clearInterval(id)
+      }, [frameKey])
+
+      const commit = useCallback(
+        (next) => {
+          game.act((draft) => {
+            draft.pet = { id: config.id, x: next.x, y: next.y }
+            return true
+          })
+        },
+        [game, config?.id],
+      )
+
+      const onPointerDown = useCallback(
+        (event) => {
+          if (!active || event.button === 2) return
+          const scene = event.currentTarget.closest('.mt-scene')
+          if (!scene) return
+          event.preventDefault()
+          try {
+            event.currentTarget.setPointerCapture(event.pointerId)
+          } catch {}
+          const rect = scene.getBoundingClientRect()
+          dragRef.current = {
+            rect,
+            dx: event.clientX - (rect.left + posRef.current.x * rect.width),
+            dy: event.clientY - (rect.top + posRef.current.y * rect.height),
+          }
+          setDragging(true)
+        },
+        [active],
+      )
+
+      const onPointerMove = useCallback((event) => {
+        const drag = dragRef.current
+        if (!drag) return
+        const x = clamp((event.clientX - drag.rect.left - drag.dx) / drag.rect.width, 0.04, 0.96)
+        const y = clamp((event.clientY - drag.rect.top - drag.dy) / drag.rect.height, 0.06, 0.96)
+        setDirection(x >= posRef.current.x ? 1 : -1)
+        setPos({ x, y })
+      }, [])
+
+      const onPointerUp = useCallback(
+        (event) => {
+          if (!dragRef.current) return
+          dragRef.current = null
+          setDragging(false)
+          try {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          } catch {}
+          commit(posRef.current)
+        },
+        [commit],
+      )
+
+      if (!active) return null
+
+      const sprite = (() => {
+        if (isCat) {
+          return h('img', {
+            className: `mt-pet-cat is-${animState}`,
+            src: assets && assets.items.has('cat') ? assets.url('items', 'cat') : '/moyutang-api/asset/items/cat.webp',
+            alt: '',
+            draggable: false,
+          })
+        }
+        const frame = codexPet.frame || { width: 192, height: 208, columns: 8, rows: 9 }
+        const height = 104
+        const scale = height / frame.height
+        const width = Math.round(frame.width * scale)
+        const total = animation.frames.length
+        const index = animation.frames[frameIndex % total]
+        const column = index % frame.columns
+        const row = Math.floor(index / frame.columns)
+        return h('div', {
+          className: 'mt-pet-sheet',
+          style: {
+            width: `${width}px`,
+            height: `${height}px`,
+            backgroundImage: `url("${codexPet.sprite}")`,
+            backgroundSize: `${frame.columns * width}px ${frame.rows * height}px`,
+            backgroundPosition: `-${column * width}px -${row * height}px`,
+          },
+        })
+      })()
+
+      return h(
+        'div',
+        {
+          className: `mt-pet${dragging ? ' is-dragging' : ''}${animState === 'failed' ? ' is-failed' : ''}`,
+          style: { left: `${pos.x * 100}%`, top: `${pos.y * 100}%` },
+          title: draggingHint,
+          onPointerDown,
+          onPointerMove,
+          onPointerUp,
+          onPointerCancel: onPointerUp,
+        },
+        sprite,
+      )
     }
 
     function FishImage({ fish, size = 72, assets, locked = false, shiny = false }) {
@@ -1150,6 +1344,7 @@ window.__ModuleLoader__.load({
           m.power = 0
           m.float = null
           m.splash = false
+          m.outcome = { kind: 'miss', at: performance.now() }
           if (!options.silent) {
             act((save) => {
               save.stats.misses += 1
@@ -1213,6 +1408,7 @@ window.__ModuleLoader__.load({
         }
         m.phase = 'card'
         m.holding = false
+        m.outcome = { kind: 'catch', at: performance.now() }
         bump()
       }, [act, bump, clearCard, onToast, ref])
 
@@ -1564,6 +1760,7 @@ window.__ModuleLoader__.load({
         splash: m.splash,
         castFrom: m.castFrom,
         castTo: m.castTo,
+        outcome: m.outcome || null,
         primaryDown,
         primaryUp,
         tap,
@@ -1744,13 +1941,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    const SCENE_DECOR_SLOTS = [
-      { left: '4%', bottom: '3%' },
-      { left: '19%', bottom: '5%' },
-      { left: '63%', bottom: '2%' },
-      { left: '79%', bottom: '4%' },
-    ]
-
     const STORM_RIPPLES = [
       ['30%', '58%'],
       ['47%', '67%'],
@@ -1783,7 +1973,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function PondScene({ pond, phase, power, watching, bite, machine, decorations, reduceMotion, assets, floatArt, storm }) {
+    function PondScene({ pond, phase, power, watching, bite, machine, decorations, reduceMotion, assets, floatArt, storm, pet }) {
       const artUrl = assets && assets.ponds.has(pond.id) ? assets.url('ponds', pond.id) : null
       const knownDecor = (decorations || []).filter((id) => assets && assets.items.has(id))
       const anchorFrom = (pond.anchor && pond.anchor.from) || [6, 104]
@@ -1808,28 +1998,32 @@ window.__ModuleLoader__.load({
               y: (anchorFrom[1] + float.y) / 2 + lineSag,
             }
           : null
+        const decorSlots = knownDecor.map((id, index) => ({
+          id,
+          left: `${knownDecor.length === 1 ? 46 : 8 + (index * 76) / (knownDecor.length - 1)}%`,
+          bottom: `${2.5 + (index % 2) * 2}%`,
+        }))
         return h(
           'div',
           { className: `mt-scene mt-scene-photo${bite && !reduceMotion ? ' mt-scene-bite' : ''}` },
           h('div', { className: 'mt-scene-art', style: { backgroundImage: `url("${artUrl}")` } }),
           h(WeatherLayer, { storm, phase, reduceMotion }),
           h('div', { className: 'mt-scene-vignette' }),
-          knownDecor.length > 0
+          decorSlots.length > 0
             ? h(
                 'div',
                 { className: 'mt-scene-decor' },
-                knownDecor.map((id, index) => {
-                  const slot = SCENE_DECOR_SLOTS[index % SCENE_DECOR_SLOTS.length]
-                  return h(
+                decorSlots.map((slot) =>
+                  h(
                     'span',
                     {
-                      key: id,
+                      key: slot.id,
                       className: 'mt-scene-decor-item',
                       style: { left: slot.left, bottom: slot.bottom },
                     },
-                    h(ItemIcon, { id, assets, size: 72 }),
-                  )
-                }),
+                    h(ItemIcon, { id: slot.id, assets, size: 72 }),
+                  ),
+                ),
               )
             : null,
           machine.phase === 'charging'
@@ -1868,6 +2062,7 @@ window.__ModuleLoader__.load({
           bite && float
             ? h('span', { className: 'mt-bite-bubble', style: { left: `${float.x}%`, top: `${float.y}%` } }, '咬钩！')
             : null,
+          pet || null,
           charge,
         )
       }
@@ -1929,6 +2124,7 @@ window.__ModuleLoader__.load({
             )
           : null,
         bite ? h('div', { className: 'mt-bite-tag' }, '咬钩！') : null,
+        pet || null,
         charge,
       )
     }
@@ -1978,6 +2174,7 @@ window.__ModuleLoader__.load({
 
     function PondView({ game, metrics, t, toast, assets }) {
       const save = game.save
+      const petState = usePets()
       const weather = weatherNow(save, metrics.metrics)
       const storm = weather.storm
       const reasoningMs = metrics.metrics?.reasoningMsToday || 0
@@ -2077,7 +2274,43 @@ window.__ModuleLoader__.load({
           assets,
           floatArt: save.gear.line === 'glow' ? 'glow' : 'bobber',
           storm,
+          pet: h(PetLayer, {
+            game,
+            pets: petState.pets,
+            machine,
+            auto: Boolean(save.settings.auto),
+            assets,
+            draggingHint: t('petDragHint'),
+          }),
         }),
+        h(
+          'div',
+          { className: 'mt-pet-bar' },
+          h('span', { className: 'mt-pet-bar-label' }, t('petLabel')),
+          h(
+            'select',
+            {
+              className: 'mt-select',
+              value: save.pet?.id || '',
+              onChange: (event) => {
+                const id = event.target.value
+                game.act((draft) => {
+                  draft.pet = id
+                    ? { id, x: draft.pet?.x ?? 0.76, y: draft.pet?.y ?? 0.84 }
+                    : null
+                  return true
+                })
+              },
+            },
+            h('option', { value: '' }, t('petNone')),
+            save.owned.cat ? h('option', { value: 'cat' }, '像素猫') : null,
+            petState.pets.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.displayName)),
+          ),
+          save.pet ? h('span', { className: 'mt-pet-bar-hint' }, t('petDragHint')) : null,
+          !save.owned.cat && petState.pets.length === 0
+            ? h('span', { className: 'mt-pet-bar-hint' }, t('petShopHint'))
+            : null,
+        ),
         h(
           'div',
           { className: 'mt-pond-status' },
@@ -2488,6 +2721,49 @@ window.__ModuleLoader__.load({
                           if (!draft.decor.includes(item.id)) draft.decor.push(item.id)
                         })
                         toast(ok ? `${t('bought')} ${item.name} · ${t('decorPlaced')}` : t('noCoins'))
+                      },
+                    }, t('buy')),
+              ),
+            )
+          }),
+        ),
+        h('h3', { className: 'mt-group-title' }, t('shopPet')),
+        h(
+          'div',
+          { className: 'mt-list' },
+          PET_ITEMS.map((item) => {
+            const owned = Boolean(save.owned[item.id])
+            const active = save.pet?.id === item.id
+            return h(
+              'div',
+              { key: item.id, className: 'mt-row' },
+              h(ItemIcon, { id: item.id, assets, size: 36 }),
+              h('div', { className: 'mt-row-main' },
+                h('div', { className: 'mt-row-title' }, item.name, active ? h(Pill, { tone: 'good' }, t('petFollowing')) : null),
+                h('div', { className: 'mt-row-desc' }, item.desc),
+              ),
+              h('div', { className: 'mt-row-side' },
+                h('span', { className: 'mt-price' }, `${fmtInt(item.price)} ${t('coins')}`),
+                owned
+                  ? h('button', {
+                      type: 'button',
+                      className: 'mt-btn',
+                      onClick: () =>
+                        game.act((draft) => {
+                          draft.pet = active ? null : { id: item.id, x: draft.pet?.x ?? 0.76, y: draft.pet?.y ?? 0.84 }
+                          return true
+                        }),
+                    }, active ? t('hide') : t('show'))
+                  : h('button', {
+                      type: 'button',
+                      className: 'mt-btn mt-btn-primary',
+                      disabled: save.coins < item.price,
+                      onClick: () => {
+                        const ok = spend(item.price, (draft) => {
+                          draft.owned[item.id] = true
+                          draft.pet = { id: item.id, x: 0.76, y: 0.84 }
+                        })
+                        toast(ok ? `${t('bought')} ${item.name} · ${t('petDragHint')}` : t('noCoins'))
                       },
                     }, t('buy')),
               ),
@@ -3222,6 +3498,24 @@ window.__ModuleLoader__.load({
 .mt-scene-vignette{position:absolute;inset:0;pointer-events:none;background:
   radial-gradient(ellipse at 50% 42%,transparent 44%,rgba(6,12,18,.32) 100%),
   linear-gradient(180deg,rgba(0,0,0,.12),transparent 26%,transparent 72%,rgba(0,0,0,.26))}
+.mt-pet{position:absolute;transform:translate(-50%,-100%);cursor:grab;touch-action:none;z-index:4;
+  filter:drop-shadow(0 6px 10px rgba(0,0,0,.45));user-select:none;-webkit-user-select:none}
+.mt-pet.is-dragging{cursor:grabbing;filter:drop-shadow(0 10px 16px rgba(0,0,0,.55))}
+.mt-pet img,.mt-pet-sheet{display:block;pointer-events:none}
+.mt-pet-sheet{background-repeat:no-repeat;image-rendering:pixelated}
+.mt-pet-cat{width:84px;height:84px;object-fit:contain;animation:mt-pet-bob 2.8s ease-in-out infinite}
+.mt-pet-cat.is-jumping{animation:mt-pet-hop .6s ease-out}
+.mt-pet-cat.is-failed{animation:mt-pet-sad .6s ease-in-out}
+.mt-pet-cat.is-running-right{animation:mt-pet-bob .8s ease-in-out infinite}
+.mt-pet-cat.is-running-left{animation:mt-pet-bob .8s ease-in-out infinite;transform:scaleX(-1)}
+@keyframes mt-pet-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes mt-pet-hop{0%{transform:translateY(0)}30%{transform:translateY(-18px)}60%{transform:translateY(-6px)}100%{transform:translateY(0)}}
+@keyframes mt-pet-sad{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(2px) rotate(-4deg)}75%{transform:translateY(2px) rotate(4deg)}}
+.mt-pet-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.mt-pet-bar-label{color:var(--dsw-alias-label-secondary)}
+.mt-pet-bar-hint{color:var(--dsw-alias-label-secondary);font-size:11.5px}
+.mt-select{padding:3px 8px;border-radius:8px;font:inherit;font-size:12px;cursor:pointer;
+  border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}
 .mt-scene-decor{position:absolute;left:0;right:0;bottom:0;height:36%;pointer-events:none}
 .mt-scene-decor-item{position:absolute;display:flex;align-items:flex-end;pointer-events:none;
   filter:drop-shadow(0 5px 9px rgba(0,0,0,.5));animation:mt-decor-in .4s ease-out both}
@@ -3438,6 +3732,12 @@ window.__ModuleLoader__.load({
       stormStarted: '雷雨来了，持续',
       minutes: '分钟',
       shopConsumable: '消耗品',
+      shopPet: '宠物',
+      petLabel: '宠物',
+      petNone: '不显示',
+      petFollowing: '跟随中',
+      petDragHint: '按住可以拖到画面任意位置',
+      petShopHint: '也可以把 Codex 宠物放进 ~/.codex/pets',
       sunny: '晴天',
       deepDive: '深潜',
       autoMode: '挂机钓鱼',
@@ -3564,6 +3864,12 @@ window.__ModuleLoader__.load({
       stormStarted: 'Storm started for',
       minutes: 'min',
       shopConsumable: 'Consumables',
+      shopPet: 'Pet',
+      petLabel: 'Pet',
+      petNone: 'None',
+      petFollowing: 'Following',
+      petDragHint: 'Drag it anywhere on the pond',
+      petShopHint: 'Codex pets work too - drop them in ~/.codex/pets',
       sunny: 'Clear',
       deepDive: 'Deep dive',
       autoMode: 'Auto fishing',
