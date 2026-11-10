@@ -20,7 +20,7 @@ const instrumented = source.replace(
       rollFish, rollQuality, rollSize, sellPrice, marketOf, fishWeight,
       creditFromMetrics, creditWithCap, streakMultiplier,
       defaultSave, ensureDay, buildQuests, questProgress, unlockRequirementMissing,
-      dayKey, shiftDay, hash32, phaseOfHour, habitatText, commitCatch, checkAchievements }
+      dayKey, shiftDay, hash32, phaseOfHour, habitatText, commitCatch, checkAchievements, weatherNow }
 ${marker}`,
 )
 const temporary = path.join(path.join(ROOT, 'tools'), '.tmp-client.mjs')
@@ -193,6 +193,18 @@ check('distinct species tracked', fresh.stats.dayStats.distinct.includes('moyu')
 MT.commitCatch(fresh, MT.PONDS[0], fish, { ...item, uid: 'y', size: 30 }, false)
 check('second catch keeps the bigger record', fresh.collection.moyu.maxSize === 30 && fresh.collection.moyu.count === 2)
 check('hour is reported for achievements', typeof info.localHour === 'number')
+
+/* ---- weather ------------------------------------------------------- */
+
+const weatherSave = MT.defaultSave()
+check('clear weather by default', MT.weatherNow(weatherSave, { storm: false }).storm === false)
+check('agent errors bring a storm', MT.weatherNow(weatherSave, { storm: true }).storm === true)
+weatherSave.effects.stormUntil = Date.now() + 5 * 60 * 1000
+const forced = MT.weatherNow(weatherSave, { storm: false })
+check('weather bottle forces a storm', forced.storm === true && forced.forcedUntil > Date.now())
+weatherSave.effects.stormUntil = Date.now() - 1000
+check('expired bottle falls back to clear', MT.weatherNow(weatherSave, { storm: false }).storm === false)
+check('expired bottle reports no remaining time', MT.weatherNow(weatherSave, { storm: false }).forcedUntil === 0)
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)
 process.exit(failures === 0 ? 0 : 1)

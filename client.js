@@ -241,6 +241,16 @@ window.__ModuleLoader__.load({
       { id: 'cat', name: '像素猫', price: 800, art: 'cat', desc: '它会盯着水面，但从不帮忙。' },
     ]
 
+    const CONSUMABLES = [
+      {
+        id: 'weather',
+        name: '天气瓶',
+        price: 300,
+        minutes: 10,
+        desc: '打开瓶塞，鱼塘立刻下 10 分钟雷雨：水面会打雷下雨，Bug 类鱼出现率翻倍。',
+      },
+    ]
+
     const QUEST_POOL = [
       { id: 'cast5', text: '抛竿 5 次', metric: 'casts', target: 5, coins: 60 },
       { id: 'catch5', text: '钓上 5 条鱼', metric: 'catches', target: 5, coins: 80 },
@@ -501,6 +511,7 @@ window.__ModuleLoader__.load({
         cheat: { manual: 0 },
         settings: { auto: false, autoPond: 'newbie-creek', reduceMotion: false, confirmPause: true },
         auto: null,
+        effects: { stormUntil: 0 },
         updatedAt: Date.now(),
       }
     }
@@ -534,6 +545,7 @@ window.__ModuleLoader__.load({
         merged.diary = Array.isArray(raw.diary) ? raw.diary.slice(0, MAX_DIARY) : []
         merged.feed = Array.isArray(raw.feed) ? raw.feed.slice(0, 12) : []
         merged.auto = raw.auto && typeof raw.auto === 'object' ? raw.auto : null
+        merged.effects = { ...base.effects, ...(raw.effects || {}) }
         merged.ponds = Array.isArray(raw.ponds) && raw.ponds.length > 0 ? raw.ponds : ['newbie-creek']
         merged.decor = Array.isArray(raw.decor) ? raw.decor : []
         merged.owned = raw.owned && typeof raw.owned === 'object' ? raw.owned : {}
@@ -957,6 +969,16 @@ window.__ModuleLoader__.load({
       return clamp(reasoningMs > 0 ? reasoningMs / (10 * 60 * 1000) : todayTokens / 300000, 0, 1)
     }
 
+    /** 当前天气：Agent 连续报错 → 雷雨；天气瓶可以强制一段时间的雷雨。 */
+    function weatherNow(save, metrics) {
+      const until = save?.effects?.stormUntil || 0
+      const forcedUntil = until > Date.now() ? until : 0
+      return {
+        storm: forcedUntil > 0 || Boolean(metrics?.storm),
+        forcedUntil,
+      }
+    }
+
     function runAutoCast() {
       const store = gameStore()
       const save = store.get()
@@ -969,7 +991,7 @@ window.__ModuleLoader__.load({
       const deepDive = effectiveDeepDive(metrics)
       if (pond.id === 'context-abyss' && deepDive < 0.05) return
       if (save.points + 1e-6 < pond.cost) return
-      const storm = Boolean(metrics?.storm)
+      const storm = weatherNow(save, metrics).storm
       const success = Math.random() < BALANCE.autoSuccess
       store.act((draft) => {
         draft.points = Math.max(0, draft.points - pond.cost)
@@ -1247,7 +1269,7 @@ window.__ModuleLoader__.load({
         const now = performance.now()
         const [low, high] = BALANCE.biteWaitMs
         const current = new Date()
-        const storm = Boolean(metricsRef.current?.storm)
+        const storm = weatherNow(ref.current, metricsRef.current).storm
         const options = {
           power,
           bait,
@@ -1717,7 +1739,39 @@ window.__ModuleLoader__.load({
       { left: '79%', bottom: '4%' },
     ]
 
-    function PondScene({ pond, phase, power, watching, bite, machine, decorations, reduceMotion, assets, floatArt }) {
+    const STORM_RIPPLES = [
+      ['30%', '58%'],
+      ['47%', '67%'],
+      ['66%', '61%'],
+      ['80%', '71%'],
+    ]
+
+    function WeatherLayer({ storm, phase, reduceMotion }) {
+      return h(
+        'div',
+        { className: `mt-weather${storm ? ' is-storm' : ''}`, 'aria-hidden': true },
+        phase === 'night' ? h('div', { className: 'mt-time-tint', style: { background: 'rgba(20,30,72,.22)' } }) : null,
+        phase === 'dusk' ? h('div', { className: 'mt-time-tint', style: { background: 'rgba(255,138,80,.12)' } }) : null,
+        phase === 'morning' ? h('div', { className: 'mt-time-tint', style: { background: 'rgba(255,214,150,.09)' } }) : null,
+        storm ? h('div', { className: 'mt-storm-dark' }) : null,
+        storm && !reduceMotion ? h('div', { className: 'mt-rain mt-rain-a' }) : null,
+        storm && !reduceMotion ? h('div', { className: 'mt-rain mt-rain-b' }) : null,
+        storm && !reduceMotion
+          ? STORM_RIPPLES.map((spot, index) =>
+              h('span', {
+                key: `ripple-${index}`,
+                className: 'mt-storm-ripple',
+                style: { left: spot[0], top: spot[1], animationDelay: `${index * 0.65}s` },
+              }),
+            )
+          : null,
+        storm && !reduceMotion ? h('div', { className: 'mt-thunder mt-thunder-a' }) : null,
+        storm && !reduceMotion ? h('div', { className: 'mt-thunder mt-thunder-b' }) : null,
+        !storm ? h('div', { className: 'mt-sun-glow' }) : null,
+      )
+    }
+
+    function PondScene({ pond, phase, power, watching, bite, machine, decorations, reduceMotion, assets, floatArt, storm }) {
       const artUrl = assets && assets.ponds.has(pond.id) ? assets.url('ponds', pond.id) : null
       const knownDecor = (decorations || []).filter((id) => assets && assets.items.has(id))
       const anchorFrom = (pond.anchor && pond.anchor.from) || [6, 104]
@@ -1746,6 +1800,7 @@ window.__ModuleLoader__.load({
           'div',
           { className: `mt-scene mt-scene-photo${bite && !reduceMotion ? ' mt-scene-bite' : ''}` },
           h('div', { className: 'mt-scene-art', style: { backgroundImage: `url("${artUrl}")` } }),
+          h(WeatherLayer, { storm, phase, reduceMotion }),
           h('div', { className: 'mt-scene-vignette' }),
           knownDecor.length > 0
             ? h(
@@ -1846,6 +1901,7 @@ window.__ModuleLoader__.load({
           shadows,
         ),
         h('div', { className: 'mt-bank', style: { background: pond.palette.bank } }),
+        h(WeatherLayer, { storm, phase, reduceMotion }),
         h(
           'div',
           { className: 'mt-decor' },
@@ -1910,7 +1966,8 @@ window.__ModuleLoader__.load({
 
     function PondView({ game, metrics, t, toast, assets }) {
       const save = game.save
-      const storm = Boolean(metrics.metrics?.storm)
+      const weather = weatherNow(save, metrics.metrics)
+      const storm = weather.storm
       const reasoningMs = metrics.metrics?.reasoningMsToday || 0
       const todayTokens = metrics.metrics?.todayEffectiveTokens || 0
       // 深潜 = Agent 今天想得够不够久；provider 不报 reasoning 时退化为今天的有效 Token 量。
@@ -2007,6 +2064,7 @@ window.__ModuleLoader__.load({
           reduceMotion: save.settings.reduceMotion,
           assets,
           floatArt: save.gear.line === 'glow' ? 'glow' : 'bobber',
+          storm,
         }),
         h(
           'div',
@@ -2015,8 +2073,12 @@ window.__ModuleLoader__.load({
           h(
             'span',
             { className: 'mt-pond-weather' },
-            h('i', { className: `mt-dot${storm ? ' mt-dot-bad' : ' mt-dot-good'}` }),
-            `${storm ? t('storm') : t('sunny')} · ${PHASE_LABEL[phase]} · ${t('deepDive')} ${Math.round(deepDive * 100)}%`,
+            h('i', { className: `mt-dot${storm ? ' mt-dot-bad mt-dot-pulse' : ' mt-dot-good'}` }),
+            `${storm ? t('storm') : t('sunny')}${
+              weather.forcedUntil
+                ? ` · ${t('stormLeft')} ${Math.max(1, Math.round((weather.forcedUntil - Date.now()) / 60000))} ${t('minutes')}`
+                : ''
+            } · ${PHASE_LABEL[phase]} · ${t('deepDive')} ${Math.round(deepDive * 100)}%`,
           ),
         ),
         machine.phase === 'reel'
@@ -2404,6 +2466,39 @@ window.__ModuleLoader__.load({
                         toast(ok ? `${t('bought')} ${item.name} · ${t('decorPlaced')}` : t('noCoins'))
                       },
                     }, t('buy')),
+              ),
+            )
+          }),
+        ),
+        h('h3', { className: 'mt-group-title' }, t('shopConsumable')),
+        h(
+          'div',
+          { className: 'mt-list' },
+          CONSUMABLES.map((item) => {
+            const active = (save.effects?.stormUntil || 0) > Date.now()
+            return h(
+              'div',
+              { key: item.id, className: 'mt-row' },
+              h(ItemIcon, { id: item.id, assets, size: 36 }),
+              h('div', { className: 'mt-row-main' },
+                h('div', { className: 'mt-row-title' }, item.name, active ? h(Pill, { tone: 'warn' }, t('stormActive')) : null),
+                h('div', { className: 'mt-row-desc' }, item.desc),
+              ),
+              h('div', { className: 'mt-row-side' },
+                h('span', { className: 'mt-price' }, `${fmtInt(item.price)} ${t('coins')}`),
+                h('button', {
+                  type: 'button',
+                  className: 'mt-btn mt-btn-primary',
+                  disabled: save.coins < item.price,
+                  onClick: () => {
+                    const ok = spend(item.price, (draft) => {
+                      const base = Math.max(Date.now(), draft.effects?.stormUntil || 0)
+                      draft.effects = { ...(draft.effects || {}), stormUntil: base + item.minutes * 60000 }
+                      pushFeed(draft, `打开了天气瓶：${item.minutes} 分钟雷雨`)
+                    })
+                    toast(ok ? `${t('stormStarted')} ${item.minutes} ${t('minutes')}` : t('noCoins'))
+                  },
+                }, t('buy')),
               ),
             )
           }),
@@ -3079,6 +3174,27 @@ window.__ModuleLoader__.load({
 .mt-decor-cat{right:24%}
 .mt-scene-photo{background:#0d141b}
 .mt-scene-art{position:absolute;inset:0;background-size:cover;background-position:center}
+.mt-weather{position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:inherit}
+.mt-time-tint{position:absolute;inset:0}
+.mt-storm-dark{position:absolute;inset:0;background:linear-gradient(180deg,rgba(16,24,42,.44),rgba(8,14,24,.30))}
+.mt-rain{position:absolute;left:-15%;right:-15%;top:-26%;height:152%;opacity:.42;
+  background-image:repeating-linear-gradient(100deg,rgba(198,226,255,.34) 0 1px,transparent 1px 9px);
+  background-size:100% 26px;animation:mt-rain .45s linear infinite;will-change:background-position}
+.mt-rain-b{opacity:.26;background-size:100% 38px;animation:mt-rain-b .72s linear infinite;
+  background-image:repeating-linear-gradient(96deg,rgba(214,236,255,.30) 0 1px,transparent 1px 15px)}
+.mt-thunder{position:absolute;inset:0;background:#e9f2ff;opacity:0;mix-blend-mode:screen}
+.mt-thunder-a{animation:mt-thunder 9.4s linear infinite}
+.mt-thunder-b{animation:mt-thunder 14.3s linear infinite;animation-delay:3.1s}
+.mt-storm-ripple{position:absolute;width:30px;height:11px;margin:-5px 0 0 -15px;border-radius:50%;
+  border:1px solid rgba(224,240,255,.6);opacity:0;animation:mt-storm-ripple 2.6s ease-out infinite}
+.mt-sun-glow{position:absolute;inset:0;opacity:.55;
+  background:radial-gradient(ellipse at 76% 6%,rgba(255,238,180,.26),transparent 58%)}
+@keyframes mt-rain{from{background-position:0 0}to{background-position:-16px 26px}}
+@keyframes mt-rain-b{from{background-position:0 0}to{background-position:-22px 38px}}
+@keyframes mt-thunder{0%,87%{opacity:0}88%{opacity:.55}89%{opacity:.03}90.5%{opacity:.42}92%{opacity:0}100%{opacity:0}}
+@keyframes mt-storm-ripple{0%{transform:scale(.4);opacity:.8}70%{opacity:.18}100%{transform:scale(1.7);opacity:0}}
+.mt-dot-pulse{animation:mt-dot-pulse 1.2s ease-in-out infinite}
+@keyframes mt-dot-pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,111,108,.55)}70%{box-shadow:0 0 0 6px rgba(239,111,108,0)}}
 .mt-scene-vignette{position:absolute;inset:0;pointer-events:none;background:
   radial-gradient(ellipse at 50% 42%,transparent 44%,rgba(6,12,18,.32) 100%),
   linear-gradient(180deg,rgba(0,0,0,.12),transparent 26%,transparent 72%,rgba(0,0,0,.26))}
@@ -3289,6 +3405,11 @@ window.__ModuleLoader__.load({
       round: '回合',
       reelHint: '鱼挣扎时松手放线，鱼累了按住收线；张力超过上限会断线。',
       storm: '雷雨',
+      stormLeft: '剩',
+      stormActive: '生效中',
+      stormStarted: '雷雨来了，持续',
+      minutes: '分钟',
+      shopConsumable: '消耗品',
       sunny: '晴天',
       deepDive: '深潜',
       autoMode: '挂机钓鱼',
@@ -3409,6 +3530,11 @@ window.__ModuleLoader__.load({
       round: 'Round',
       reelHint: 'Give line while it fights, reel while it tires. Too much tension snaps the line.',
       storm: 'Thunderstorm',
+      stormLeft: 'ends in',
+      stormActive: 'Active',
+      stormStarted: 'Storm started for',
+      minutes: 'min',
+      shopConsumable: 'Consumables',
       sunny: 'Clear',
       deepDive: 'Deep dive',
       autoMode: 'Auto fishing',

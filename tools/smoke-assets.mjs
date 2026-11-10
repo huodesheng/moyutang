@@ -12,7 +12,7 @@ const source = fs.readFileSync(path.join(ROOT, 'client.js'), 'utf8')
 const marker = '    return {\n      inject: [\'slots\'],'
 const instrumented = source.replace(
   marker,
-  `    globalThis.__MT_ASSETS__ = { FishImage, ItemIcon, PondScene, CatchCard, FISH, PONDS }
+  `    globalThis.__MT_ASSETS__ = { FishImage, ItemIcon, PondScene, CatchCard, WeatherLayer, FISH, PONDS }
 ${marker}`,
 )
 const temporary = path.join(path.join(ROOT, 'tools'), '.tmp-assets.mjs')
@@ -169,6 +169,26 @@ const fallbackScene = collect(render(api.PondScene, {
   assets: { ...assets, ponds: new Set() },
 }))
 check('pond scene falls back to the CSS sky', fallbackScene.some((node) => node.props.className === 'mt-sky'))
+
+const stormScene = collect(render(api.PondScene, { ...sceneProps, storm: true }))
+check('pond scene hands the storm to the weather layer',
+  stormScene.some((node) => node.type === api.WeatherLayer && node.props.storm === true))
+
+const stormLayers = collect(render(api.WeatherLayer, { storm: true, phase: 'day', reduceMotion: false }))
+check('storm paints rain, ripples and thunder',
+  stormLayers.some((node) => String(node.props.className || '').includes('mt-rain'))
+  && stormLayers.some((node) => node.props.className === 'mt-storm-ripple')
+  && stormLayers.some((node) => String(node.props.className || '').includes('mt-thunder')))
+check('storm drops the sunny glow', !stormLayers.some((node) => node.props.className === 'mt-sun-glow'))
+
+const clearLayers = collect(render(api.WeatherLayer, { storm: false, phase: 'day', reduceMotion: false }))
+check('clear weather keeps the sunny glow', clearLayers.some((node) => node.props.className === 'mt-sun-glow'))
+check('clear weather has no rain', !clearLayers.some((node) => String(node.props.className || '').includes('mt-rain')))
+
+const calmStorm = collect(render(api.WeatherLayer, { storm: true, phase: 'night', reduceMotion: true }))
+check('reduce motion keeps the darkening but drops rain', calmStorm.some((node) => node.props.className === 'mt-storm-dark')
+  && !calmStorm.some((node) => String(node.props.className || '').includes('mt-rain')))
+check('night adds a time tint', calmStorm.some((node) => node.props.className === 'mt-time-tint'))
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)
 process.exit(failures === 0 ? 0 : 1)
