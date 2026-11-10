@@ -4,7 +4,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-const root = path.join(ROOT, 'dist', 'verify', 'dsh-moyutang-1.0.0')
+const manifestForVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+const root = path.join(ROOT, 'dist', 'verify', 'dsh-moyutang-' + manifestForVersion.version)
 let failures = 0
 
 function check(name, ok, detail) {

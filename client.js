@@ -499,7 +499,8 @@ window.__ModuleLoader__.load({
         diary: [],
         feed: [],
         cheat: { manual: 0 },
-        settings: { auto: false, reduceMotion: false, confirmPause: true },
+        settings: { auto: false, autoPond: 'newbie-creek', reduceMotion: false, confirmPause: true },
+        auto: null,
         updatedAt: Date.now(),
       }
     }
@@ -532,6 +533,7 @@ window.__ModuleLoader__.load({
         merged.basket = Array.isArray(raw.basket) ? raw.basket.slice(0, MAX_BASKET) : []
         merged.diary = Array.isArray(raw.diary) ? raw.diary.slice(0, MAX_DIARY) : []
         merged.feed = Array.isArray(raw.feed) ? raw.feed.slice(0, 12) : []
+        merged.auto = raw.auto && typeof raw.auto === 'object' ? raw.auto : null
         merged.ponds = Array.isArray(raw.ponds) && raw.ponds.length > 0 ? raw.ponds : ['newbie-creek']
         merged.decor = Array.isArray(raw.decor) ? raw.decor : []
         merged.owned = raw.owned && typeof raw.owned === 'object' ? raw.owned : {}
@@ -670,77 +672,120 @@ window.__ModuleLoader__.load({
     const RuntimeContext = React.createContext(null)
 
     function useRuntime() {
-      return React.useContext(RuntimeContext) || { t: (key) => key, locale: null }
+      return React.useContext(RuntimeContext) || { t: (key) => key, locale: null, layout: null }
+    }
+
+    /* 一个存档、一个计量轮询，供鱼塘面板与对话底部的挂机条共用：
+       否则两处各写各的 localStorage，会互相覆盖。 */
+
+    let gameState = null
+    const gameListeners = new Set()
+
+    function notifyGame() {
+      gameListeners.forEach((listener) => {
+        try {
+          listener()
+        } catch {}
+      })
+    }
+
+    let gameStoreInstance = null
+
+    function gameStore() {
+      if (gameStoreInstance) return gameStoreInstance
+      gameState = loadSave()
+      window.addEventListener('storage', (event) => {
+        if (event.key !== SAVE_KEY || !event.newValue) return
+        try {
+          gameState = loadSave()
+          notifyGame()
+        } catch {}
+      })
+      gameStoreInstance = {
+        get: () => gameState,
+        subscribe(listener) {
+          gameListeners.add(listener)
+          return () => gameListeners.delete(listener)
+        },
+        act(mutator) {
+          const draft = clone(gameState)
+          ensureDay(draft)
+          if (mutator(draft) === false) return false
+          draft.updatedAt = Date.now()
+          gameState = draft
+          persistSave(gameState)
+          notifyGame()
+          return true
+        },
+      }
+      return gameStoreInstance
     }
 
     function useGame() {
-      const [save, setSave] = useState(loadSave)
-      const ref = useRef(save)
-      const act = useCallback((mutator) => {
-        const draft = clone(ref.current)
-        ensureDay(draft)
-        const changed = mutator(draft)
-        if (changed === false) return false
-        draft.updatedAt = Date.now()
-        ref.current = draft
-        setSave(draft)
-        return true
-      }, [])
-      useEffect(() => {
-        const id = setTimeout(() => persistSave(save), 250)
-        return () => clearTimeout(id)
-      }, [save])
-      useEffect(() => {
-        const onStorage = (event) => {
-          if (event.key !== SAVE_KEY || !event.newValue) return
-          try {
-            const next = loadSave()
-            ref.current = next
-            setSave(next)
-          } catch {}
+      const store = gameStore()
+      const [, force] = useState(0)
+      useEffect(() => store.subscribe(() => force((value) => value + 1)), [store])
+      const ref = useMemo(
+        () => ({
+          get current() {
+            return store.get()
+          },
+        }),
+        [store],
+      )
+      return { save: store.get(), act: store.act, ref }
+    }
+
+    let metricsState = { status: 'connecting', metrics: null, debug: null, serverTime: 0, at: 0 }
+    let metricsTimer = null
+    let metricsRefs = 0
+    const metricsListeners = new Set()
+
+    async function pollMetrics() {
+      try {
+        const response = await fetch('/moyutang-api/state', { cache: 'no-store' })
+        if (!response.ok) throw new Error(`http ${response.status}`)
+        const body = await response.json()
+        if (!body || !body.metrics) throw new Error('bad payload')
+        metricsState = {
+          status: 'online',
+          metrics: body.metrics,
+          debug: body.debug || null,
+          serverTime: body.serverTime || Date.now(),
+          at: Date.now(),
         }
-        window.addEventListener('storage', onStorage)
-        return () => window.removeEventListener('storage', onStorage)
-      }, [])
-      return { save, act, ref }
+        // 结算放在轮询里：面板没打开时（只看对话）积分也照涨。
+        gameStore().act((draft) => creditFromMetrics(draft, body.metrics))
+      } catch (error) {
+        metricsState = { ...metricsState, status: 'offline' }
+      }
+      metricsListeners.forEach((listener) => {
+        try {
+          listener()
+        } catch {}
+      })
     }
 
     function useMetrics() {
-      const [state, setState] = useState({ status: 'connecting', metrics: null, debug: null, serverTime: 0, at: 0 })
+      const [, force] = useState(0)
       useEffect(() => {
-        let alive = true
-        const controller = new AbortController()
-        const tick = async () => {
-          try {
-            const response = await fetch('/moyutang-api/state', {
-              cache: 'no-store',
-              signal: controller.signal,
-            })
-            if (!response.ok) throw new Error(`http ${response.status}`)
-            const body = await response.json()
-            if (!alive || !body || !body.metrics) throw new Error('bad payload')
-            setState({
-              status: 'online',
-              metrics: body.metrics,
-              debug: body.debug || null,
-              serverTime: body.serverTime || Date.now(),
-              at: Date.now(),
-            })
-          } catch (error) {
-            if (alive) {
-              setState((prev) => ({ status: 'offline', metrics: prev.metrics, debug: prev.debug, serverTime: prev.serverTime, at: prev.at }))
-            }
+        const listener = () => force((value) => value + 1)
+        metricsRefs += 1
+        metricsListeners.add(listener)
+        if (!metricsTimer) {
+          pollMetrics()
+          metricsTimer = setInterval(pollMetrics, 5000)
+        }
+        return () => {
+          metricsListeners.delete(listener)
+          metricsRefs -= 1
+          if (metricsRefs <= 0 && metricsTimer) {
+            clearInterval(metricsTimer)
+            metricsTimer = null
           }
         }
-        tick()
-        const id = setInterval(tick, 5000)
-        return () => {
-          alive = false
-          clearInterval(id)
-          controller.abort()
-        }
       }, [])
-      return state
+      return metricsState
     }
 
     function useAssets() {
@@ -894,6 +939,104 @@ window.__ModuleLoader__.load({
       if (Object.keys(save.collection).length >= 30) award('half')
       if (save.collection.jing) award('whale')
       return unlocked
+    }
+
+    /* ------------------------------------------------------------------ *
+     * 5. 挂机钓鱼：一个模块级计时器，鱼塘面板与对话底部的挂机条共用
+     * ------------------------------------------------------------------ */
+
+    function setAutoFishing(save, enabled) {
+      save.settings.auto = Boolean(enabled)
+      if (enabled) save.auto = { startedAt: Date.now(), catches: 0, misses: 0, lastAt: 0 }
+      return true
+    }
+
+    function effectiveDeepDive(metrics) {
+      const reasoningMs = metrics?.reasoningMsToday || 0
+      const todayTokens = metrics?.todayEffectiveTokens || 0
+      return clamp(reasoningMs > 0 ? reasoningMs / (10 * 60 * 1000) : todayTokens / 300000, 0, 1)
+    }
+
+    function runAutoCast() {
+      const store = gameStore()
+      const save = store.get()
+      if (!save.settings.auto) return
+      const pond = POND_BY_ID[save.settings.autoPond] || PONDS[0]
+      if (!save.ponds.includes(pond.id)) return
+      const current = new Date()
+      if (pond.id === 'overtime-sea' && current.getHours() < 19) return
+      const metrics = metricsState.metrics
+      const deepDive = effectiveDeepDive(metrics)
+      if (pond.id === 'context-abyss' && deepDive < 0.05) return
+      if (save.points + 1e-6 < pond.cost) return
+      const storm = Boolean(metrics?.storm)
+      const success = Math.random() < BALANCE.autoSuccess
+      store.act((draft) => {
+        draft.points = Math.max(0, draft.points - pond.cost)
+        draft.stats.casts += 1
+        draft.stats.dayStats.casts += 1
+        draft.auto = {
+          startedAt: draft.auto?.startedAt || Date.now(),
+          catches: draft.auto?.catches || 0,
+          misses: draft.auto?.misses || 0,
+          lastAt: Date.now(),
+        }
+        if (!success) {
+          draft.stats.misses += 1
+          draft.stats.emptyStreak += 1
+          draft.stats.maxEmptyStreak = Math.max(draft.stats.maxEmptyStreak, draft.stats.emptyStreak)
+          draft.auto.misses += 1
+          return true
+        }
+        const options = {
+          power: 55,
+          bait: 'bread',
+          storm,
+          deepDive,
+          hour: current.getHours(),
+          phase: phaseOfHour(current.getHours()),
+          weekday: current.getDay(),
+          pity: draft.stats.sinceSR || 0,
+          random: Math.random,
+        }
+        const fish = rollFish(pond.id, options) || FISH.find((entry) => entry.pond === pond.id) || FISH[0]
+        const quality = rollQuality(Math.random)
+        const size = rollSize(fish, 55, Math.random)
+        const item = {
+          uid: uuid(),
+          fishId: fish.id,
+          size,
+          quality,
+          price: sellPrice(fish, size, quality, marketOf(dayKey())),
+          at: Date.now(),
+        }
+        const info = commitCatch(draft, pond, fish, item, storm)
+        checkAchievements(draft, info.localHour)
+        draft.auto.catches += 1
+        draft.auto.lastFish = fish.id
+        draft.auto.lastSize = size
+        return true
+      })
+    }
+
+    let autoTimer = null
+    let autoRefs = 0
+
+    function useAutoFishing() {
+      useEffect(() => {
+        autoRefs += 1
+        if (autoTimer === null) {
+          autoTimer = setInterval(runAutoCast, BALANCE.autoIntervalMs)
+          autoTimer.unref?.()
+        }
+        return () => {
+          autoRefs -= 1
+          if (autoRefs <= 0 && autoTimer !== null) {
+            clearInterval(autoTimer)
+            autoTimer = null
+          }
+        }
+      }, [])
     }
 
     function usePondMachine({ game, metrics, pond, weather, deepDive, onToast }) {
@@ -1233,64 +1376,6 @@ window.__ModuleLoader__.load({
         [act, clearCard, onToast, setMessage],
       )
 
-      const autoCast = useCallback(() => {
-        const m = machine.current
-        if (m.phase !== 'idle') return
-        const target = pondRef.current
-        const save = ref.current
-        if (!save.ponds.includes(target.id)) return
-        if (target.id === 'overtime-sea' && new Date().getHours() < 19) return
-        if (target.id === 'context-abyss' && deepDive < 0.05) return
-        if (save.points + 1e-6 < target.cost) return
-        act((draft) => {
-          draft.points = Math.max(0, draft.points - target.cost)
-          draft.stats.casts += 1
-          draft.stats.dayStats.casts += 1
-          return true
-        })
-        const current = new Date()
-        const options = {
-          power: 55,
-          bait: 'bread',
-          storm: Boolean(metricsRef.current?.storm),
-          deepDive,
-          hour: current.getHours(),
-          phase: phaseOfHour(current.getHours()),
-          weekday: current.getDay(),
-          pity: ref.current.stats.sinceSR || 0,
-          random: Math.random,
-        }
-        const ok = Math.random() < BALANCE.autoSuccess
-        if (!ok) {
-          act((draft) => {
-            draft.stats.misses += 1
-            draft.stats.emptyStreak += 1
-            draft.stats.maxEmptyStreak = Math.max(draft.stats.maxEmptyStreak, draft.stats.emptyStreak)
-            return true
-          })
-          if (onToast) onToast('挂机：这一竿空军了')
-          return
-        }
-        const fish = rollFish(target.id, options) || FISH[0]
-        const quality = rollQuality(Math.random)
-        const size = rollSize(fish, 55, Math.random)
-        const item = {
-          uid: uuid(),
-          fishId: fish.id,
-          size,
-          quality,
-          price: sellPrice(fish, size, quality, marketOf(dayKey())),
-          at: Date.now(),
-        }
-        act((draft) => {
-          const info = commitCatch(draft, target, fish, item, Boolean(options.storm))
-          const unlocked = checkAchievements(draft, info.localHour)
-          if (unlocked.length > 0 && onToast) onToast(`成就解锁：${unlocked.map((a) => a.name).join('、')}`)
-          return true
-        })
-        if (onToast) onToast(`挂机：钓到 ${fish.name} · ${size}cm`)
-      }, [act, deepDive, onToast, ref])
-
       useEffect(() => {
         let raf = 0
         let last = performance.now()
@@ -1425,12 +1510,7 @@ window.__ModuleLoader__.load({
         }
       }, [holdEnd])
 
-      const auto = Boolean(game.save.settings.auto)
-      useEffect(() => {
-        if (!auto) return
-        const id = setInterval(() => autoCast(), BALANCE.autoIntervalMs)
-        return () => clearInterval(id)
-      }, [auto, autoCast])
+      useAutoFishing()
 
       const m = machine.current
       return {
@@ -1834,9 +1914,21 @@ window.__ModuleLoader__.load({
         1,
       )
       const [pondId, setPondId] = useState(() => {
+        const preferred = save.settings.autoPond
+        if (preferred && save.ponds.includes(preferred)) return preferred
         const unlocked = PONDS.filter((p) => save.ponds.includes(p.id))
         return (unlocked[unlocked.length - 1] || PONDS[0]).id
       })
+      const choosePond = useCallback(
+        (id) => {
+          setPondId(id)
+          game.act((draft) => {
+            draft.settings.autoPond = id
+            return true
+          })
+        },
+        [game],
+      )
       const pond = POND_BY_ID[pondId] || PONDS[0]
       const machine = usePondMachine({ game, metrics, pond, weather: { storm }, deepDive, onToast: toast })
       const now = new Date()
@@ -1889,7 +1981,7 @@ window.__ModuleLoader__.load({
                 className: `mt-pond-chip${entry.id === pondId ? ' is-active' : ''}${entryLocked ? ' is-locked' : ''}`,
                 onClick: () => {
                   if (machine.phase !== 'idle') return
-                  setPondId(entry.id)
+                  choosePond(entry.id)
                 },
                 title: entry.tagline,
               },
@@ -1976,12 +2068,20 @@ window.__ModuleLoader__.load({
               type: 'checkbox',
               checked: Boolean(save.settings.auto),
               onChange: (event) =>
-                game.act((draft) => {
-                  draft.settings.auto = event.target.checked
-                  return true
-                }),
+                game.act((draft) => setAutoFishing(draft, event.target.checked)),
             }),
             h('span', null, t('autoMode')),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'mt-btn',
+              onClick: () => {
+                game.act((draft) => setAutoFishing(draft, !draft.settings.auto))
+              },
+            },
+            save.settings.auto ? t('autoStop') : t('autoStart'),
           ),
         ),
         machine.message ? h('div', { className: 'mt-message' }, machine.message) : null,
@@ -2518,7 +2618,7 @@ window.__ModuleLoader__.load({
               h('input', {
                 type: 'checkbox',
                 checked: Boolean(save.settings.auto),
-                onChange: (event) => game.act((draft) => { draft.settings.auto = event.target.checked; return true }),
+                onChange: (event) => game.act((draft) => setAutoFishing(draft, event.target.checked)),
               }),
             ),
           ),
@@ -2680,10 +2780,6 @@ window.__ModuleLoader__.load({
       const [toast, pushToast] = useToast()
       const save = game.save
 
-      useEffect(() => {
-        if (metrics.metrics) game.act((draft) => creditFromMetrics(draft, metrics.metrics))
-      }, [metrics.metrics, game.act])
-
       const multiplier = streakMultiplier(save.credit.streak)
       const tabs = [
         ['pond', t('tabPond')],
@@ -2755,6 +2851,102 @@ window.__ModuleLoader__.load({
         h('div', { className: 'mt-scroll' }, body),
         toast ? h('div', { className: 'mt-toast', role: 'status' }, toast.text) : null,
       )
+    }
+
+    /* ------------------------------------------------------------------ *
+     * 6.5 对话底部的挂机条：和 token 统计并排，勾上就一直在后台钓
+     * ------------------------------------------------------------------ */
+
+    const DOCK_STYLE = `
+.mt-dock{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:1px 2px 5px;
+  font-size:11.5px;line-height:1.5;color:var(--dsw-alias-label-secondary)}
+.mt-dock-toggle{display:inline-flex;align-items:center;gap:6px;padding:2px 9px 2px 6px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);
+  color:var(--dsw-alias-label-primary);font:inherit}
+.mt-dock-toggle:hover{background:var(--dsw-alias-bg-layer-2)}
+.mt-dock-toggle.is-on{border-color:var(--dsw-alias-state-success-primary)}
+.mt-dock-check{width:12px;height:12px;border-radius:3px;border:1px solid var(--dsw-alias-border-l2);
+  display:inline-flex;align-items:center;justify-content:center;font-size:9px;line-height:1;
+  color:var(--dsw-alias-bg-base);flex:0 0 auto}
+.mt-dock-toggle.is-on .mt-dock-check{background:var(--dsw-alias-state-success-primary);
+  border-color:var(--dsw-alias-state-success-primary)}
+.mt-dock-live{display:inline-flex;align-items:center;color:var(--dsw-alias-state-success-primary)}
+.mt-dock-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-success-primary);
+  display:inline-block;margin-right:6px;animation:mt-dock-pulse 1.6s ease-in-out infinite}
+.mt-dock-points{font-variant-numeric:tabular-nums}
+.mt-dock-open{border:none;background:transparent;color:var(--dsw-alias-brand-primary);cursor:pointer;
+  font:inherit;padding:1px 3px;text-decoration:underline;text-underline-offset:2px}
+@keyframes mt-dock-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.mt-dock-dot{animation:none}}
+`
+
+    function AutoDock() {
+      const runtime = useRuntime()
+      const t = runtime.t
+      const game = useGame()
+      const metrics = useMetrics()
+      useAutoFishing()
+      const save = game.save
+      const auto = Boolean(save.settings.auto)
+      const pond = POND_BY_ID[save.settings.autoPond] || PONDS[0]
+      const catches = save.auto?.catches || 0
+      const misses = save.auto?.misses || 0
+      const points = fmt(save.points)
+      const openPond = () => {
+        try {
+          runtime.layout?.selectPanel?.('moyutang')
+        } catch {}
+      }
+      return h(
+        'div',
+        { className: 'mt-dock' },
+        h('style', { dangerouslySetInnerHTML: { __html: DOCK_STYLE } }),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: `mt-dock-toggle${auto ? ' is-on' : ''}`,
+            'aria-pressed': auto,
+            title: t('autoHint'),
+            onClick: () => game.act((draft) => setAutoFishing(draft, !draft.settings.auto)),
+          },
+          h('span', { className: 'mt-dock-check', 'aria-hidden': true }, auto ? '✓' : ''),
+          h('span', null, t('autoMode')),
+        ),
+        auto
+          ? h(
+              'span',
+              { className: 'mt-dock-live' },
+              h('i', { className: 'mt-dock-dot', 'aria-hidden': true }),
+              `${t('autoRunning')} · ${pond.name} · ${t('autoCaught')} ${catches}${misses > 0 ? ` · ${t('autoMissed')} ${misses}` : ''}`,
+            )
+          : h('span', null, `${t('autoIdle')} · ${pond.name}`),
+        h('span', { className: 'mt-dock-points' }, `${t('points')} ${points}`),
+        metrics.status === 'offline' ? h('span', null, t('offline')) : null,
+        h('button', { type: 'button', className: 'mt-dock-open', onClick: openPond }, t('openPond')),
+      )
+    }
+
+    class DockBoundary extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { error: null }
+      }
+
+      static getDerivedStateFromError(error) {
+        return { error }
+      }
+
+      componentDidCatch(error) {
+        console.error('[moyutang] dock crashed', error)
+      }
+
+      render() {
+        if (this.state.error) {
+          return h('div', { className: 'mt-dock' }, h('style', { dangerouslySetInnerHTML: { __html: DOCK_STYLE } }), '摸鱼塘挂机条加载失败')
+        }
+        return this.props.children
+      }
     }
 
     /* ------------------------------------------------------------------ *
@@ -3073,6 +3265,13 @@ window.__ModuleLoader__.load({
       sunny: '晴天',
       deepDive: '深潜',
       autoMode: '挂机钓鱼',
+      autoRunning: '挂机中',
+      autoIdle: '挂机未开',
+      autoCaught: '已钓',
+      autoMissed: '空军',
+      autoStart: '开始挂机',
+      autoStop: '停止挂机',
+      openPond: '打开鱼塘',
       autoHint: 'Agent 长时间工作时自动抛竿，成功率 60%。',
       ready: '条件已满足',
       unlockFor: '解锁花费',
@@ -3184,6 +3383,13 @@ window.__ModuleLoader__.load({
       sunny: 'Clear',
       deepDive: 'Deep dive',
       autoMode: 'Auto fishing',
+      autoRunning: 'Fishing',
+      autoIdle: 'Auto off',
+      autoCaught: 'caught',
+      autoMissed: 'missed',
+      autoStart: 'Start',
+      autoStop: 'Stop',
+      openPond: 'Open pond',
       autoHint: 'Casts on its own while the agent works, 60% success.',
       ready: 'Requirements met',
       unlockFor: 'Unlock for',
@@ -3334,10 +3540,17 @@ window.__ModuleLoader__.load({
           }
         }
         const t = buildTranslator(localeService)
-        const runtime = { t, locale: localeService }
+        let layout = null
+        try {
+          layout = ctx.get ? ctx.get('layout') : null
+        } catch {}
+        const runtime = { t, locale: localeService, layout }
 
         const PanelSeat = () =>
           h(RuntimeContext.Provider, { value: runtime }, h(PanelBoundary, null, h(MoyutangPanel)))
+
+        const DockSeat = () =>
+          h(RuntimeContext.Provider, { value: runtime }, h(DockBoundary, null, h(AutoDock)))
 
         const registerIcon = () =>
           ctx.slots.register(
@@ -3358,8 +3571,15 @@ window.__ModuleLoader__.load({
 
         const registerPanel = () => ctx.slots.register({ name: 'main', key: 'moyutang' }, PanelSeat)
 
+        const registerDock = () =>
+          ctx.slots.register(
+            { name: 'conversation.composer.dock', id: 'moyutang-auto', order: 2, label: () => t('autoMode') },
+            DockSeat,
+          )
+
         ctx.slots.inject('sidebar.panellist', registerIcon)
         ctx.slots.inject('main', registerPanel)
+        ctx.slots.inject('conversation.composer.dock', registerDock)
       },
     }
   },

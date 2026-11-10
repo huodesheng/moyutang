@@ -261,14 +261,17 @@ console.log(
 
 const icon = registrations.find((entry) => entry.options.name === 'sidebar.panellist')
 const panel = registrations.find((entry) => entry.options.name === 'main')
+const dock = registrations.find((entry) => entry.options.name === 'conversation.composer.dock')
 render('SidebarIcon', React.createElement(icon.component, { size: 20, active: true }))
 render('SidebarIcon (inactive, no props)', React.createElement(icon.component))
+render('AutoDock', React.createElement(dock.component, { sessionId: 'test' }))
 for (const tab of ['pond', 'collection', 'shop', 'basket', 'quests', 'settings']) {
   globalThis.__FORCE_TAB__ = tab
   render(`PanelSeat [${tab}]`, React.createElement(panel.component))
 }
 globalThis.__FORCE_TAB__ = null
 console.log('labels:', icon.options.label())
+console.log('registrations:', registrations.map((entry) => `${entry.options.name}:${entry.options.id || entry.options.key}`).join(', '))
 console.log('components rendered:', renders.size)
 
 console.log('errors:', errors.length === 0 ? 'none' : errors)

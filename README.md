@@ -121,7 +121,7 @@ npm publish --access public     # 带 scope 时必须加 --access public
 - **会话天气**：Host 半统计 5 分钟内 ≥2 次工具报错 → 雷雨；雷雨中 Bug 鲈出现率翻倍，水面变暗。
 - **昼夜**：清晨 / 白天 / 黄昏 / 深夜，部分鱼只在特定时段出现（拿铁锦鲤清晨、屏幕光鲷深夜、灵感鱼 03:00–04:00 隐藏条目）。
 - **深潜**：Agent 今天思考越久（reasoning 时长；provider 不上报时用今日有效 Token 折算）深潜值越高，上下文深渊需要 ≥5% 才能下钩。
-- **挂机钓鱼**：Agent 长时间工作时可开启，每 12 秒自动抛竿一次，成功率 60%，结果直接进鱼篓。
+- **挂机钓鱼**：输入框下方的状态条上有「挂机钓鱼」开关（就在 Token 统计旁边）。勾上后每 12 秒自动抛竿一次（成功率 60%），**切到对话、关掉鱼塘面板也继续钓**，状态条实时显示「挂机中 · 鱼塘 · 已钓 N 条 · 空军 M」，钓到的鱼直接进鱼篓。每竿照常扣积分，鱼塘取「最后选择的那个」。
 - **股市波动**：每天两种鱼热卖 ×2、一种滞销 ×0.5，买卖节奏随日期变化。
 
 ### 图鉴 / 商城 / 委托 / 成就
@@ -165,7 +165,8 @@ assets/prompts/fish.json  生成鱼贴图用的提示词清单
 tools/                数值测试、渲染测试、素材处理与生图脚本
 ```
 
-- **槽位**：`ctx.slots.inject('sidebar.panellist', ...)` 注册 `id: moyutang` 的图标，`ctx.slots.inject('main', ...)` 注册 `key: moyutang` 的面板；点击图标由侧边栏切换面板。
+- **槽位**：`ctx.slots.inject('sidebar.panellist', ...)` 注册 `id: moyutang` 的图标，`ctx.slots.inject('main', ...)` 注册 `key: moyutang` 的面板；点击图标由侧边栏切换面板。另外 `conversation.composer.dock` 槽位注册了 `id: moyutang-auto` 的挂机条，排在 Token 统计之后。
+- **一份存档、一个轮询**：游戏状态（`gameStore`）与 Token 计量（`metricsState`）都是模块级单例，面板与挂机条订阅同一条状态流；积分结算写在计量轮询里，所以只开着对话、不打开鱼塘面板，鱼饵也照涨。挂机计时器同样是模块级、按引用计数启停，两个入口同时打开也只有一个计时器。
 - **状态机**：蓄力 → 等待咬钩 → 张力收线 → 鱼卡，全部由单个 `requestAnimationFrame` 循环驱动；随机数、概率表、价格、软上限都是纯函数。
 - **存档**：`localStorage["dsh.moyutang.save.v1"]`，带版本号字段、按天重置、支持导出/导入；跨标签页同步。
 - **美术资源**：Host 半按 `GET /moyutang-api/assets` 列出清单、按 `GET /moyutang-api/asset/<fish|items|ponds>/<id>.webp` 同源返回（带 ETag 与 24h 缓存，拒绝目录穿越）。Client 半拿到清单后把图铺到鱼塘场景、图鉴、鱼卡、鱼篓与商城；缺图时自动回退到内置的像素鱼 SVG。
