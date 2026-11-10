@@ -90,19 +90,24 @@ function neutral(extra) {
 
 let nulls = 0
 const rarityCount = { N: 0, R: 0, SR: 0, SSR: 0, UR: 0 }
-for (let i = 0; i < 20000; i += 1) {
+const seen = new Set()
+const ROLLS = 60000
+for (let i = 0; i < ROLLS; i += 1) {
   const fish = MT.rollFish('newbie-creek', neutral())
   if (!fish) {
     nulls += 1
     continue
   }
   rarityCount[fish.rarity] += 1
+  seen.add(fish.id)
 }
 check('rolls always return a fish', nulls === 0, nulls)
-const total = 20000
-const srPlus = (rarityCount.SR + rarityCount.SSR + rarityCount.UR) / total
-check('SR+ rate within 3%–25%', srPlus > 0.03 && srPlus < 0.25, srPlus)
-check('UR rate under 3%', rarityCount.UR / total < 0.03, rarityCount.UR / total)
+for (const [rarity, expected] of [['N', 0.6], ['R', 0.25], ['SR', 0.11], ['SSR', 0.035], ['UR', 0.005]]) {
+  const rate = rarityCount[rarity] / ROLLS
+  const ok = Math.abs(rate - expected) / expected < 0.25
+  check(`${rarity} rate matches the design table (${(expected * 100).toFixed(1)}%)`, ok, `${(rate * 100).toFixed(2)}%`)
+}
+check('every fish in the first pond can be rolled', seen.size === MT.FISH.filter((f) => f.pond === 'newbie-creek').length, `${seen.size} species`)
 
 let pityViolations = 0
 for (let i = 0; i < 3000; i += 1) {

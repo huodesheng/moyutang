@@ -214,6 +214,16 @@ window.__ModuleLoader__.load({
     const FISH_BY_ID = Object.fromEntries(FISH.map((f) => [f.id, f]))
     const BOSSES = FISH.filter((f) => f.boss)
 
+    /** 每个鱼塘里各稀有度的鱼数：稀有度概率是"整档"的，要按数量均分到每条鱼。 */
+    const RARITY_COUNT = (() => {
+      const map = {}
+      for (const fish of FISH) {
+        if (!map[fish.pond]) map[fish.pond] = {}
+        map[fish.pond][fish.rarity] = (map[fish.pond][fish.rarity] || 0) + 1
+      }
+      return map
+    })()
+
     const RODS = [
       { id: 'bamboo', name: '竹竿', price: 0, tolerance: 1, desc: '手感一般，但足够开始摸鱼。' },
       { id: 'carbon', name: '碳素竿', price: 200, tolerance: 1.25, desc: '张力条更宽，断线更少。' },
@@ -359,8 +369,10 @@ window.__ModuleLoader__.load({
     }
 
     function fishWeight(fish, options) {
-      let weight = RARITY[fish.rarity].weight
-      if (fish.boss) weight *= 0.28 * (0.4 + clamp(options.power / 100, 0, 1) * 0.6)
+      // 稀有度概率按"整档"分配：先除以该档在本塘的鱼数，否则 N×3 会吃掉三倍权重，
+      // SSR / UR 只剩理论值的几分之一（原来 SSR 实际 1.2%、UR 0.04%）。
+      const group = RARITY_COUNT[fish.pond]?.[fish.rarity] || 1
+      let weight = RARITY[fish.rarity].weight / group
       if (fish.hidden) {
         if (!inHours(fish, options.hour)) return 0
         weight *= 0.7
@@ -2199,6 +2211,18 @@ window.__ModuleLoader__.load({
             h('strong', null, save.favor[pondId] || 0),
           ),
         ),
+        h(
+          'div',
+          { className: 'mt-odds' },
+          h('span', { className: 'mt-odds-label' }, t('oddsTitle')),
+          ['N', 'R', 'SR', 'SSR', 'UR'].map((rarity) =>
+            h(
+              'span',
+              { key: rarity, className: 'mt-odds-item', style: { color: RARITY[rarity].color } },
+              `${RARITY[rarity].label} ${(RARITY[rarity].weight * 100).toFixed(rarity === 'SSR' || rarity === 'UR' ? 1 : 0)}%`,
+            ),
+          ),
+        ),
         save.decor.length > 0
           ? h(
               'div',
@@ -3268,6 +3292,10 @@ window.__ModuleLoader__.load({
 .mt-reel-round{font-size:12px;color:var(--dsw-alias-state-warn-primary)}
 .mt-reel-hint{font-size:11.5px;color:var(--dsw-alias-label-secondary)}
 .mt-message{font-size:12px;color:var(--dsw-alias-state-warn-primary)}
+.mt-odds{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11.5px;
+  color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.mt-odds-label{color:var(--dsw-alias-label-secondary)}
+.mt-odds-item{font-weight:600}
 .mt-decor-note{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
 .mt-decor-label{color:var(--dsw-alias-label-secondary)}
 .mt-decor-tag{display:inline-flex;align-items:center;gap:4px;padding:1px 8px 1px 2px;border-radius:999px;
@@ -3451,6 +3479,7 @@ window.__ModuleLoader__.load({
       shopDecor: '装饰',
       decorPlaced: '已摆到岸边',
       decorOnBank: '岸边已摆放',
+      oddsTitle: '本塘稀有度',
       buy: '购买',
       equip: '装备',
       equipped: '已装备',
@@ -3576,6 +3605,7 @@ window.__ModuleLoader__.load({
       shopDecor: 'Decorations',
       decorPlaced: 'placed on the bank',
       decorOnBank: 'On the bank',
+      oddsTitle: 'Pond odds',
       buy: 'Buy',
       equip: 'Equip',
       equipped: 'Equipped',
