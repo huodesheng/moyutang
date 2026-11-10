@@ -1710,7 +1710,12 @@ window.__ModuleLoader__.load({
       )
     }
 
-    const SCENE_DECOR_SLOTS = ['6%', '22%', '60%', '76%']
+    const SCENE_DECOR_SLOTS = [
+      { left: '4%', bottom: '3%' },
+      { left: '19%', bottom: '5%' },
+      { left: '63%', bottom: '2%' },
+      { left: '79%', bottom: '4%' },
+    ]
 
     function PondScene({ pond, phase, power, watching, bite, machine, decorations, reduceMotion, assets, floatArt }) {
       const artUrl = assets && assets.ponds.has(pond.id) ? assets.url('ponds', pond.id) : null
@@ -1746,17 +1751,18 @@ window.__ModuleLoader__.load({
             ? h(
                 'div',
                 { className: 'mt-scene-decor' },
-                knownDecor.map((id, index) =>
-                  h(
+                knownDecor.map((id, index) => {
+                  const slot = SCENE_DECOR_SLOTS[index % SCENE_DECOR_SLOTS.length]
+                  return h(
                     'span',
                     {
                       key: id,
                       className: 'mt-scene-decor-item',
-                      style: { left: SCENE_DECOR_SLOTS[index % SCENE_DECOR_SLOTS.length] },
+                      style: { left: slot.left, bottom: slot.bottom },
                     },
-                    h(ItemIcon, { id, assets, size: 34 }),
-                  ),
-                ),
+                    h(ItemIcon, { id, assets, size: 72 }),
+                  )
+                }),
               )
             : null,
           machine.phase === 'charging'
@@ -2131,6 +2137,19 @@ window.__ModuleLoader__.load({
             h('strong', null, save.favor[pondId] || 0),
           ),
         ),
+        save.decor.length > 0
+          ? h(
+              'div',
+              { className: 'mt-decor-note' },
+              h('span', { className: 'mt-decor-label' }, t('decorOnBank')),
+              save.decor.map((id) => {
+                const item = DECOR.find((entry) => entry.id === id)
+                return item
+                  ? h('span', { key: id, className: 'mt-decor-tag' }, h(ItemIcon, { id, assets, size: 20 }), item.name)
+                  : null
+              }),
+            )
+          : null,
         h(
           'div',
           { className: 'mt-note' },
@@ -2382,7 +2401,7 @@ window.__ModuleLoader__.load({
                           draft.owned[item.id] = true
                           if (!draft.decor.includes(item.id)) draft.decor.push(item.id)
                         })
-                        toast(ok ? `${t('bought')} ${item.name}` : t('noCoins'))
+                        toast(ok ? `${t('bought')} ${item.name} · ${t('decorPlaced')}` : t('noCoins'))
                       },
                     }, t('buy')),
               ),
@@ -3063,8 +3082,11 @@ window.__ModuleLoader__.load({
 .mt-scene-vignette{position:absolute;inset:0;pointer-events:none;background:
   radial-gradient(ellipse at 50% 42%,transparent 44%,rgba(6,12,18,.32) 100%),
   linear-gradient(180deg,rgba(0,0,0,.12),transparent 26%,transparent 72%,rgba(0,0,0,.26))}
-.mt-scene-decor{position:absolute;left:0;right:0;bottom:1.5%;height:40px;pointer-events:none}
-.mt-scene-decor-item{position:absolute;bottom:0;filter:drop-shadow(0 2px 5px rgba(0,0,0,.5))}
+.mt-scene-decor{position:absolute;left:0;right:0;bottom:0;height:36%;pointer-events:none}
+.mt-scene-decor-item{position:absolute;display:flex;align-items:flex-end;pointer-events:none;
+  filter:drop-shadow(0 5px 9px rgba(0,0,0,.5));animation:mt-decor-in .4s ease-out both}
+.mt-scene-decor-item img{display:block;object-fit:contain}
+@keyframes mt-decor-in{from{opacity:0;transform:translateY(8px) scale(.86)}to{opacity:1;transform:translateY(0) scale(1)}}
 .mt-fishing-line{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
 .mt-fishing-line path{fill:none;stroke:rgba(255,255,255,.72);stroke-width:1.2;vector-effect:non-scaling-stroke;
   stroke-linecap:round;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
@@ -3130,6 +3152,10 @@ window.__ModuleLoader__.load({
 .mt-reel-round{font-size:12px;color:var(--dsw-alias-state-warn-primary)}
 .mt-reel-hint{font-size:11.5px;color:var(--dsw-alias-label-secondary)}
 .mt-message{font-size:12px;color:var(--dsw-alias-state-warn-primary)}
+.mt-decor-note{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.mt-decor-label{color:var(--dsw-alias-label-secondary)}
+.mt-decor-tag{display:inline-flex;align-items:center;gap:4px;padding:1px 8px 1px 2px;border-radius:999px;
+  background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}
 .mt-stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
 .mt-stat{display:flex;flex-direction:column;gap:2px;padding:8px 12px;border-radius:10px;
   background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);font-size:12px}
@@ -3226,6 +3252,7 @@ window.__ModuleLoader__.load({
   .mt-scroll{padding:12px 12px 28px}
   .mt-header{padding:10px 12px}
   .mt-tabs{padding:6px 10px}
+  .mt-scene-decor-item img{width:52px;height:52px}
 }
 @media (prefers-reduced-motion:reduce){
   .mt-ripple,.mt-shadow,.mt-float,.mt-bite-tag,.mt-card,.mt-toast,.mt-scene-bite,.mt-target-ring,.mt-splash i{animation:none}
@@ -3301,6 +3328,8 @@ window.__ModuleLoader__.load({
       shopLine: '浮漂与线',
       shopBait: '鱼饵',
       shopDecor: '装饰',
+      decorPlaced: '已摆到岸边',
+      decorOnBank: '岸边已摆放',
       buy: '购买',
       equip: '装备',
       equipped: '已装备',
@@ -3419,6 +3448,8 @@ window.__ModuleLoader__.load({
       shopLine: 'Floats and line',
       shopBait: 'Bait',
       shopDecor: 'Decorations',
+      decorPlaced: 'placed on the bank',
+      decorOnBank: 'On the bank',
       buy: 'Buy',
       equip: 'Equip',
       equipped: 'Equipped',
