@@ -8,6 +8,25 @@
 - **Host 半**只统计 Token 用量，不读对话内容；**Client 半**是全部游戏逻辑与界面。
 - 存档在浏览器 localStorage，Token 计数在 `~/.dsh/moyutang/metrics.json`，没有任何外部网络请求。
 
+## 宣传片
+
+[![摸鱼塘 · 60 秒宣传片封面](docs/promo/poster.jpg)](docs/promo/moyutang-promo-720p.mp4)
+
+▶️ [**观看 60 秒宣传片**（720p 配音版，20 MB）](docs/promo/moyutang-promo-720p.mp4) · [字幕 SRT](docs/promo/moyutang-promo.srt) · [竖版海报](docs/promo/poster-vertical.jpg)
+
+![宣传片动图预览：标题、Token 变成鱼饵、咬钩、SSR 鱼卡、鲸落、品牌尾卡](docs/promo/highlight.webp)
+
+60 秒 · 1920×1080@30fps 渲染（仓库内为 720p 版本；1080p 约 118 MB，未入库）。画面用 Pillow/numpy 逐帧合成，配乐与音效由 numpy 原创合成，中文旁白由小米 MiMo TTS（`mimo-v2.5-tts`，音色「冰糖」）生成；全片无外部素材、无外部服务依赖。
+
+### 画面一览
+
+| | | | |
+| --- | --- | --- | --- |
+| ![标题揭示](docs/promo/01-title.jpg) | ![Token → 鱼饵积分](docs/promo/02-token.jpg) | ![咬钩](docs/promo/03-bite.jpg) | ![SSR 鱼卡](docs/promo/04-ssr-card.jpg) |
+| ![60 格图鉴](docs/promo/05-dex.jpg) | ![深度求索鲸落](docs/promo/06-whale.jpg) | ![挂机钓鱼](docs/promo/07-autofish.jpg) | ![品牌尾卡](docs/promo/08-brand.jpg) |
+
+> 视频约 20 MB，`git` 安装会连同 `docs/promo/` 一起拉取；只想要插件本体的话建议用下面的 zip 方式。
+
 ## 打开方式
 
 侧边栏图标列表里第三个图标（在「插件」「日程」之后），点击即打开鱼塘面板。首次打开建议刷新一次页面，确保加载的是最新版客户端代码。
